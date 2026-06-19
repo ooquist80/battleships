@@ -27,6 +27,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  selectedShipIndex: {
+    type: Number,
+    default: null,
+  },
 });
 
 const emit = defineEmits(['cell-select']);
@@ -118,6 +122,7 @@ function onCellSelect(x, y) {
               :reveal-ships="revealShips"
               :interactive="interactive"
               :disabled="isDisabled(cell, x, y)"
+              :selected="props.selectedShipIndex !== null && cell.shipIndex === props.selectedShipIndex"
               @select="onCellSelect(x, y)"
             />
             <span :class="rowLabelClasses">

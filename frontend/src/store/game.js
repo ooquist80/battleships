@@ -11,6 +11,7 @@ function createCell() {
   return {
     hasShip: false,
     shot: null,
+    shipIndex: null,
   };
 }
 
@@ -124,10 +125,10 @@ function createPlacementBoardFromShips(ships) {
     return board;
   }
 
-  for (const ship of ships) {
+  ships.forEach((ship, idx) => {
     const length = Number(ship.length);
     if (!Number.isInteger(length) || length <= 0) {
-      continue;
+      return;
     }
 
     const orientation = normalizePlacementOrientation(ship.orientation) ?? 'horizontal';
@@ -145,8 +146,9 @@ function createPlacementBoardFromShips(ships) {
       }
 
       board[y][x].hasShip = true;
+      board[y][x].shipIndex = idx;
     }
-  }
+  });
 
   return board;
 }
@@ -326,6 +328,7 @@ const state = reactive({
     ships: [],
     nextShipIndex: 0,
     submitted: false,
+    selectedShipIndex: null,
   },
   pendingShot: null,
   recentEvents: [],
@@ -370,6 +373,7 @@ function resetPlacement() {
   state.placement.ships = [];
   state.placement.nextShipIndex = 0;
   state.placement.submitted = false;
+  state.placement.selectedShipIndex = null;
 }
 
 function copyPlacementToOwnBoard() {
@@ -408,7 +412,7 @@ function setLobbyOpponentName(value) {
   state.lobbyOpponentName = String(value ?? '');
 }
 
-function canPlaceShipAt(board, x, y, length, orientation) {
+function canPlaceShipAt(board, x, y, length, orientation, ignoreShipIndex = -1) {
   const horizontal = orientation === 'horizontal';
 
   if (horizontal && x + length > GRID_SIZE) {
@@ -422,12 +426,29 @@ function canPlaceShipAt(board, x, y, length, orientation) {
   for (let offset = 0; offset < length; offset += 1) {
     const cellX = horizontal ? x + offset : x;
     const cellY = horizontal ? y : y + offset;
-    if (board[cellY][cellX].hasShip) {
+    const cell = board[cellY][cellX];
+    if (cell.hasShip && cell.shipIndex !== ignoreShipIndex) {
       return false;
     }
   }
 
   return true;
+}
+
+function rebuildPlacementBoard() {
+  const board = createBoard();
+  state.placement.ships.forEach((ship, idx) => {
+    const horizontal = ship.orientation === 'horizontal';
+    for (let offset = 0; offset < ship.length; offset += 1) {
+      const x = ship.x + (horizontal ? offset : 0);
+      const y = ship.y + (horizontal ? 0 : offset);
+      if (x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE) {
+        board[y][x].hasShip = true;
+        board[y][x].shipIndex = idx;
+      }
+    }
+  });
+  state.placement.board = board;
 }
 
 function togglePlacementOrientation() {
@@ -452,6 +473,48 @@ function placeShip(x, y) {
     return;
   }
 
+  const cell = state.placement.board[y]?.[x];
+  const selectedIdx = state.placement.selectedShipIndex;
+
+  if (selectedIdx !== null) {
+    const ship = state.placement.ships[selectedIdx];
+
+    // Tapping the selected ship rotates it
+    if (cell?.shipIndex === selectedIdx) {
+      const newOrientation = ship.orientation === 'horizontal' ? 'vertical' : 'horizontal';
+      if (!canPlaceShipAt(state.placement.board, ship.x, ship.y, ship.length, newOrientation, selectedIdx)) {
+        addEvent('Cannot rotate: not enough space.');
+        return;
+      }
+      state.placement.ships[selectedIdx] = { ...ship, orientation: newOrientation };
+      rebuildPlacementBoard();
+      return;
+    }
+
+    // Tapping a different placed ship selects it
+    if (cell?.shipIndex !== null && cell?.shipIndex !== undefined) {
+      state.placement.selectedShipIndex = cell.shipIndex;
+      return;
+    }
+
+    // Tapping an empty cell moves the selected ship there
+    if (!canPlaceShipAt(state.placement.board, x, y, ship.length, ship.orientation, selectedIdx)) {
+      addEvent('Invalid placement. Ships cannot overlap or go out of bounds.');
+      return;
+    }
+    state.placement.ships[selectedIdx] = { ...ship, x, y };
+    state.placement.selectedShipIndex = null;
+    rebuildPlacementBoard();
+    return;
+  }
+
+  // Tapping a placed ship selects it
+  if (cell?.hasShip && cell?.shipIndex !== null && cell?.shipIndex !== undefined) {
+    state.placement.selectedShipIndex = cell.shipIndex;
+    return;
+  }
+
+  // Tapping an empty cell places the next ship
   const length = nextShipLength.value;
   if (!length) {
     return;
@@ -462,13 +525,6 @@ function placeShip(x, y) {
     return;
   }
 
-  const horizontal = state.placement.orientation === 'horizontal';
-  for (let offset = 0; offset < length; offset += 1) {
-    const cellX = horizontal ? x + offset : x;
-    const cellY = horizontal ? y : y + offset;
-    state.placement.board[cellY][cellX].hasShip = true;
-  }
-
   state.placement.ships.push({
     x,
     y,
@@ -476,6 +532,7 @@ function placeShip(x, y) {
     orientation: state.placement.orientation,
   });
   state.placement.nextShipIndex += 1;
+  rebuildPlacementBoard();
 
   if (allShipsPlaced.value) {
     addEvent('All ships placed. Submit when ready.');

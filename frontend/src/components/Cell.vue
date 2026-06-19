@@ -22,6 +22,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  selected: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(['select']);
@@ -54,6 +58,7 @@ const buttonClasses = computed(() => [
     : 'cursor-default',
   shotState.value === 'hit' ? 'border-rose-400/80 bg-rose-950/70' : '',
   shotState.value === 'miss' ? 'bg-slate-700/90' : '',
+  props.selected && showShip.value && !shotState.value ? 'border-indigo-400/80 bg-indigo-950/80' : '',
 ]);
 
 const markerClasses = computed(() => [
@@ -68,10 +73,15 @@ const markerClasses = computed(() => [
       ? 'h-1.5 w-1.5 bg-slate-300/80 sm:h-2 sm:w-2'
       : 'h-2 w-2 bg-slate-300/80'
     : '',
-  !shotState.value && showShip.value
+  !shotState.value && showShip.value && !props.selected
     ? props.compact
       ? 'h-2.5 w-2.5 border border-slate-100/70 bg-slate-100 shadow-[0_0_12px_rgba(226,232,240,0.65)] sm:h-3 sm:w-3 md:h-4 md:w-4'
       : 'h-4 w-4 border border-slate-100/70 bg-slate-100 shadow-[0_0_16px_rgba(226,232,240,0.65)]'
+    : '',
+  !shotState.value && showShip.value && props.selected
+    ? props.compact
+      ? 'h-2.5 w-2.5 border border-indigo-300/70 bg-indigo-400 shadow-[0_0_12px_rgba(129,140,248,0.7)] sm:h-3 sm:w-3 md:h-4 md:w-4'
+      : 'h-4 w-4 border border-indigo-300/70 bg-indigo-400 shadow-[0_0_14px_rgba(129,140,248,0.8)]'
     : '',
   !shotState.value && !showShip.value
     ? props.compact

@@ -227,7 +227,8 @@ function setActiveMobileBoard(boardName) {
         title="Deployment board"
         :board="state.placement.board"
         :reveal-ships="true"
-        :interactive="!state.placement.submitted && Boolean(nextShipLength)"
+        :interactive="!state.placement.submitted"
+        :selected-ship-index="state.placement.selectedShipIndex"
         @cell-select="onPlacementCellSelect"
       />
 
