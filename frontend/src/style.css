@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --ui-bg-start: #f5f5ff;
+  --ui-bg-end: #edf3ff;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  background:
+    radial-gradient(1200px 600px at -10% -20%, #ddd6fe 0%, transparent 60%),
+    radial-gradient(900px 500px at 120% -10%, #bfdbfe 0%, transparent 52%),
+    linear-gradient(180deg, var(--ui-bg-start) 0%, var(--ui-bg-end) 100%);
+  color: #0f172a;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+@layer components {
+  .ui-shell {
+    @apply mx-auto w-full max-w-[1440px] rounded-[28px] border border-white/70 bg-white/70 shadow-[0_24px_70px_-30px_rgba(15,23,42,0.45)] backdrop-blur;
+  }
+
+  .ui-topbar {
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3 sm:px-6 sm:py-4;
+  }
+
+  .ui-brand {
+    @apply text-lg font-black tracking-tight text-slate-900 sm:text-xl;
+  }
+
+  .ui-brand-accent {
+    @apply text-indigo-500;
+  }
+
+  .ui-nav-link {
+    @apply rounded-md px-3 py-1.5 text-sm font-medium text-slate-500 transition hover:text-slate-900;
+  }
+
+  .ui-nav-link--active {
+    @apply text-slate-900 underline decoration-2 underline-offset-6;
+  }
+
+  .ui-meta-chip {
+    @apply inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700;
+  }
+
+  .ui-card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-[0_12px_30px_-24px_rgba(15,23,42,0.45)];
+  }
+
+  .ui-card-title {
+    @apply text-sm font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .ui-primary-button {
+    @apply inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-indigo-400 to-violet-500 px-4 py-3 text-sm font-semibold text-white shadow-[0_10px_25px_-18px_rgba(109,40,217,0.9)] transition hover:from-indigo-500 hover:to-violet-600 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .ui-secondary-button {
+    @apply inline-flex w-full items-center justify-center rounded-xl bg-slate-900/90 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .ui-soft-button {
+    @apply inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+}

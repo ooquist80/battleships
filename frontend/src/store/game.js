@@ -1,0 +1,1039 @@
+import { computed, reactive, readonly } from 'vue';
+import websocketService from '../services/websocket';
+
+export const GRID_SIZE = 10;
+export const SHIP_LENGTHS = [5, 4, 3, 3, 2];
+
+const SELF_TURN_TOKEN = '__self_turn__';
+const MAX_EVENTS = 16;
+
+function createCell() {
+  return {
+    hasShip: false,
+    shot: null,
+  };
+}
+
+function createBoard() {
+  return Array.from({ length: GRID_SIZE }, () =>
+    Array.from({ length: GRID_SIZE }, () => createCell()),
+  );
+}
+
+function cloneBoard(board) {
+  return board.map((row) => row.map((cell) => ({ ...cell })));
+}
+
+function firstDefined(source, keys) {
+  for (const key of keys) {
+    if (source[key] !== undefined && source[key] !== null) {
+      return source[key];
+    }
+  }
+
+  return null;
+}
+
+function normalizeShotResult(value) {
+  const normalized = String(value ?? '').toLowerCase();
+  if (normalized.includes('hit') || normalized === 'sunk') {
+    return 'hit';
+  }
+
+  if (normalized.includes('miss')) {
+    return 'miss';
+  }
+
+  return null;
+}
+
+function readServerErrorMessage(message) {
+  const value = firstDefined(message, ['message', 'error', 'detail', 'reason']);
+  if (value === null) {
+    return 'Server reported an error.';
+  }
+
+  const text = String(value).trim();
+  return text.length > 0 ? text : 'Server reported an error.';
+}
+
+function normalizeSnapshotCell(source, revealShips) {
+  const cell = createCell();
+
+  if (typeof source === 'string') {
+    const normalized = source.toLowerCase();
+    if (normalized === 'ship' && revealShips) {
+      cell.hasShip = true;
+    } else if (normalized === 'hit' || normalized === 'sunk') {
+      cell.shot = 'hit';
+      if (revealShips) {
+        cell.hasShip = true;
+      }
+    } else if (normalized === 'miss') {
+      cell.shot = 'miss';
+    }
+    return cell;
+  }
+
+  if (typeof source === 'boolean') {
+    cell.hasShip = revealShips && source;
+    return cell;
+  }
+
+  if (typeof source === 'number') {
+    cell.hasShip = revealShips && source === 1;
+    return cell;
+  }
+
+  if (!source || typeof source !== 'object') {
+    return cell;
+  }
+
+  const shot = normalizeShotResult(source.shot ?? source.result ?? source.state);
+  if (shot) {
+    cell.shot = shot;
+  }
+
+  const hasShip = firstDefined(source, ['hasShip', 'has_ship', 'ship']);
+  if (hasShip !== null) {
+    cell.hasShip = revealShips ? Boolean(hasShip) : false;
+  } else if (revealShips && cell.shot === 'hit') {
+    cell.hasShip = true;
+  }
+
+  return cell;
+}
+
+function normalizeBoardSnapshot(snapshot, revealShips) {
+  const board = createBoard();
+  if (!Array.isArray(snapshot)) {
+    return board;
+  }
+
+  for (let y = 0; y < GRID_SIZE; y += 1) {
+    const row = snapshot[y];
+    if (!Array.isArray(row)) {
+      continue;
+    }
+
+    for (let x = 0; x < GRID_SIZE; x += 1) {
+      board[y][x] = normalizeSnapshotCell(row[x], revealShips);
+    }
+  }
+
+  return board;
+}
+
+function normalizeDisplayName(value) {
+  const normalized = String(value ?? '').trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeInviteCode(value) {
+  const normalized = String(value ?? '').trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function readConfiguredHostname() {
+  const configuredHostname = String(import.meta.env.VITE_APP_HOSTNAME ?? '').trim();
+  if (configuredHostname.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsed =
+      configuredHostname.includes('://')
+        ? new URL(configuredHostname)
+        : new URL(`http://${configuredHostname}`);
+    return parsed.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildInviteLink(inviteCode) {
+  const code = normalizeInviteCode(inviteCode);
+  if (!code) {
+    return null;
+  }
+
+  if (typeof window === 'undefined' || !window.location) {
+    return `?invite=${encodeURIComponent(code)}`;
+  }
+
+  const inviteUrl = new URL(window.location.href);
+  const configuredHostname = readConfiguredHostname();
+  if (configuredHostname) {
+    inviteUrl.hostname = configuredHostname;
+  }
+  inviteUrl.searchParams.set('invite', code);
+  return inviteUrl.toString();
+}
+
+function readInviteCodeFromLocation() {
+  if (typeof window === 'undefined' || !window.location?.search) {
+    return null;
+  }
+
+  const query = new URLSearchParams(window.location.search);
+  return normalizeInviteCode(query.get('invite')) ?? normalizeInviteCode(query.get('invite_code'));
+}
+
+const state = reactive({
+  connected: false,
+  connecting: false,
+  playerId: null,
+  lobbyPlayerName: '',
+  lobbyOpponentName: '',
+  opponentId: null,
+  gameId: null,
+  phase: 'lobby',
+  waitingForMatch: false,
+  creatingGame: false,
+  joiningInvite: false,
+  joinedFromInvite: false,
+  inviteCode: null,
+  inviteLink: null,
+  pendingCreatePayload: null,
+  pendingJoinInviteCode: null,
+  urlInviteCode: null,
+  winner: null,
+  turn: null,
+  boards: {
+    own: createBoard(),
+    opponent: createBoard(),
+  },
+  placement: {
+    board: createBoard(),
+    orientation: 'horizontal',
+    ships: [],
+    nextShipIndex: 0,
+    submitted: false,
+  },
+  pendingShot: null,
+  recentEvents: [],
+  lastError: null,
+});
+
+const allShipsPlaced = computed(() => state.placement.nextShipIndex >= SHIP_LENGTHS.length);
+const nextShipLength = computed(() => SHIP_LENGTHS[state.placement.nextShipIndex] ?? null);
+const isMyTurn = computed(() => {
+  if (state.phase !== 'playing' || state.winner) {
+    return false;
+  }
+
+  if (state.turn === SELF_TURN_TOKEN) {
+    return true;
+  }
+
+  if (state.playerId === null || state.turn === null || state.turn === undefined) {
+    return false;
+  }
+
+  return String(state.turn) === String(state.playerId);
+});
+
+let initialized = false;
+let unsubscribeFns = [];
+
+function addEvent(text) {
+  state.recentEvents.unshift({
+    id: `${Date.now()}-${Math.random()}`,
+    text,
+  });
+
+  if (state.recentEvents.length > MAX_EVENTS) {
+    state.recentEvents.length = MAX_EVENTS;
+  }
+}
+
+function resetPlacement() {
+  state.placement.board = createBoard();
+  state.placement.orientation = 'horizontal';
+  state.placement.ships = [];
+  state.placement.nextShipIndex = 0;
+  state.placement.submitted = false;
+}
+
+function copyPlacementToOwnBoard() {
+  state.boards.own = cloneBoard(state.placement.board);
+}
+
+function clearLobbyInviteState() {
+  state.waitingForMatch = false;
+  state.creatingGame = false;
+  state.joiningInvite = false;
+  state.joinedFromInvite = false;
+  state.inviteCode = null;
+  state.inviteLink = null;
+  state.pendingCreatePayload = null;
+  state.pendingJoinInviteCode = null;
+  state.opponentId = null;
+}
+
+function resetMatchState() {
+  state.gameId = null;
+  state.phase = 'lobby';
+  state.winner = null;
+  state.turn = null;
+  state.pendingShot = null;
+  state.boards.own = createBoard();
+  state.boards.opponent = createBoard();
+  resetPlacement();
+  clearLobbyInviteState();
+}
+
+function setLobbyPlayerName(value) {
+  state.lobbyPlayerName = String(value ?? '');
+}
+
+function setLobbyOpponentName(value) {
+  state.lobbyOpponentName = String(value ?? '');
+}
+
+function canPlaceShipAt(board, x, y, length, orientation) {
+  const horizontal = orientation === 'horizontal';
+
+  if (horizontal && x + length > GRID_SIZE) {
+    return false;
+  }
+
+  if (!horizontal && y + length > GRID_SIZE) {
+    return false;
+  }
+
+  for (let offset = 0; offset < length; offset += 1) {
+    const cellX = horizontal ? x + offset : x;
+    const cellY = horizontal ? y : y + offset;
+    if (board[cellY][cellX].hasShip) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function togglePlacementOrientation() {
+  if (state.phase !== 'placement' || state.placement.submitted) {
+    return;
+  }
+
+  state.placement.orientation =
+    state.placement.orientation === 'horizontal' ? 'vertical' : 'horizontal';
+}
+
+function resetPlacementBoard() {
+  if (state.phase !== 'placement' || state.placement.submitted) {
+    return;
+  }
+
+  resetPlacement();
+}
+
+function placeShip(x, y) {
+  if (state.phase !== 'placement' || state.placement.submitted) {
+    return;
+  }
+
+  const length = nextShipLength.value;
+  if (!length) {
+    return;
+  }
+
+  if (!canPlaceShipAt(state.placement.board, x, y, length, state.placement.orientation)) {
+    addEvent('Invalid placement. Ships cannot overlap or go out of bounds.');
+    return;
+  }
+
+  const horizontal = state.placement.orientation === 'horizontal';
+  for (let offset = 0; offset < length; offset += 1) {
+    const cellX = horizontal ? x + offset : x;
+    const cellY = horizontal ? y : y + offset;
+    state.placement.board[cellY][cellX].hasShip = true;
+  }
+
+  state.placement.ships.push({
+    x,
+    y,
+    length,
+    orientation: state.placement.orientation,
+  });
+  state.placement.nextShipIndex += 1;
+
+  if (allShipsPlaced.value) {
+    addEvent('All ships placed. Submit when ready.');
+  }
+}
+
+function connect() {
+  if (state.connected || state.connecting) {
+    return;
+  }
+
+  state.connecting = true;
+  websocketService.connect();
+}
+
+function sendCreateGame(payload) {
+  if (!payload) {
+    return false;
+  }
+
+  const sent = websocketService.send({
+    type: 'create_game',
+    player_name: payload.playerName,
+    opponent_name: payload.opponentName,
+  });
+  if (!sent) {
+    state.lastError = 'Failed to send create_game. WebSocket is not connected.';
+    state.waitingForMatch = false;
+    state.creatingGame = false;
+    addEvent(state.lastError);
+    return false;
+  }
+
+  state.pendingCreatePayload = null;
+  state.joiningInvite = false;
+  state.phase = 'lobby';
+  state.waitingForMatch = true;
+  state.creatingGame = true;
+  addEvent('Creating invite link...');
+  return true;
+}
+
+function sendJoinGame(inviteCode) {
+  const code = normalizeInviteCode(inviteCode);
+  if (!code) {
+    return false;
+  }
+
+  const sent = websocketService.send({
+    type: 'join_game',
+    invite_code: code,
+  });
+
+  if (!sent) {
+    state.lastError = 'Failed to send join_game. WebSocket is not connected.';
+    state.waitingForMatch = false;
+    state.joiningInvite = false;
+    addEvent(state.lastError);
+    return false;
+  }
+
+  state.pendingJoinInviteCode = null;
+  state.creatingGame = false;
+  state.phase = 'lobby';
+  state.waitingForMatch = true;
+  state.joiningInvite = true;
+  addEvent('Joining invite...');
+  return true;
+}
+
+function flushPendingLobbyActions() {
+  if (state.pendingJoinInviteCode) {
+    sendJoinGame(state.pendingJoinInviteCode);
+    return;
+  }
+
+  if (state.pendingCreatePayload) {
+    sendCreateGame(state.pendingCreatePayload);
+  }
+}
+
+function createGame() {
+  const playerName = normalizeDisplayName(state.lobbyPlayerName);
+  const opponentName = normalizeDisplayName(state.lobbyOpponentName);
+
+  if (!playerName || !opponentName) {
+    state.lastError = 'Please enter both player names before creating an invite.';
+    addEvent(state.lastError);
+    return;
+  }
+
+  state.lastError = null;
+  resetMatchState();
+  state.urlInviteCode = null;
+  state.lobbyPlayerName = playerName;
+  state.lobbyOpponentName = opponentName;
+  state.pendingCreatePayload = { playerName, opponentName };
+  state.creatingGame = true;
+  state.waitingForMatch = true;
+
+  if (!state.connected) {
+    connect();
+    addEvent('Connecting to server to create invite...');
+    return;
+  }
+
+  sendCreateGame(state.pendingCreatePayload);
+}
+
+function joinGameByInvite(inviteCode, options = {}) {
+  const code = normalizeInviteCode(inviteCode);
+  if (!code) {
+    if (!options.silent) {
+      state.lastError = 'Invite code is missing.';
+      addEvent(state.lastError);
+    }
+    return;
+  }
+
+  state.lastError = null;
+  if (options.auto) {
+    state.urlInviteCode = code;
+  }
+  resetMatchState();
+  state.inviteCode = code;
+  state.inviteLink = buildInviteLink(code);
+  state.joinedFromInvite = true;
+  state.pendingJoinInviteCode = code;
+  state.joiningInvite = true;
+  state.waitingForMatch = true;
+
+  if (!state.connected) {
+    connect();
+    addEvent(
+      options.auto
+        ? 'Invite link detected. Joining game when connection is ready...'
+        : 'Connecting to server to join invite...',
+    );
+    return;
+  }
+
+  sendJoinGame(code);
+}
+
+function submitShips() {
+  if (state.phase !== 'placement' || state.placement.submitted) {
+    return;
+  }
+
+  if (!allShipsPlaced.value) {
+    addEvent('Place every ship before submitting.');
+    return;
+  }
+
+  const ships = state.placement.ships.map(({ x, y, length, orientation }) => ({
+    x,
+    y,
+    length,
+    orientation,
+  }));
+
+  const sent = websocketService.send({ type: 'place_ships', ships });
+  if (!sent) {
+    state.lastError = 'Failed to send place_ships. WebSocket is not connected.';
+    addEvent(state.lastError);
+    return;
+  }
+
+  state.placement.submitted = true;
+  copyPlacementToOwnBoard();
+  addEvent('Ships submitted. Waiting for game start...');
+}
+
+function shoot(x, y) {
+  if (state.phase !== 'playing' || !isMyTurn.value || state.pendingShot) {
+    return;
+  }
+
+  const targetCell = state.boards.opponent[y]?.[x];
+  if (!targetCell || targetCell.shot) {
+    return;
+  }
+
+  const sent = websocketService.send({
+    type: 'shoot',
+    x,
+    y,
+  });
+
+  if (!sent) {
+    state.lastError = 'Failed to send shoot. WebSocket is not connected.';
+    addEvent(state.lastError);
+    return;
+  }
+
+  state.pendingShot = { x, y };
+}
+
+function applyServerMetadata(message) {
+  const playerId = firstDefined(message, ['playerId', 'player_id']);
+  if (playerId !== null) {
+    state.playerId = playerId;
+  }
+
+  const gameId = firstDefined(message, ['gameId', 'game_id']);
+  if (gameId !== null) {
+    state.gameId = gameId;
+  }
+
+  const opponentId = firstDefined(message, ['opponentId', 'opponent_id']);
+  if (opponentId !== null) {
+    state.opponentId = opponentId;
+  }
+
+  if (typeof message.phase === 'string') {
+    state.phase = message.phase;
+  }
+
+  const turn = firstDefined(message, ['turn', 'next_turn']);
+  if (turn !== null) {
+    state.turn = turn;
+  }
+}
+
+function readInviteCodeFromMessage(message) {
+  return normalizeInviteCode(firstDefined(message, ['invite_code', 'inviteCode', 'code']));
+}
+
+function readInviteLinkFromMessage(message) {
+  const inviteLink = firstDefined(message, [
+    'invite_link',
+    'inviteLink',
+    'invite_url',
+    'inviteUrl',
+    'link',
+    'url',
+  ]);
+
+  if (inviteLink === null) {
+    return null;
+  }
+
+  const normalized = String(inviteLink).trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function applyServerParticipantNames(message) {
+  const playerName = normalizeDisplayName(firstDefined(message, ['player_name', 'playerName']));
+  if (playerName !== null) {
+    state.lobbyPlayerName = playerName;
+  }
+
+  const opponentName = normalizeDisplayName(firstDefined(message, ['opponent_name', 'opponentName']));
+  if (opponentName !== null) {
+    state.lobbyOpponentName = opponentName;
+  }
+
+  if (!message.players || typeof message.players !== 'object') {
+    return;
+  }
+
+  const selfPlayer = firstDefined(message.players, ['self', 'player', 'you']);
+  if (selfPlayer && typeof selfPlayer === 'object') {
+    const nestedPlayerName = normalizeDisplayName(
+      firstDefined(selfPlayer, ['name', 'player_name', 'playerName']),
+    );
+    if (nestedPlayerName !== null) {
+      state.lobbyPlayerName = nestedPlayerName;
+    }
+  }
+
+  const opponentPlayer = firstDefined(message.players, ['opponent', 'enemy']);
+  if (!opponentPlayer || typeof opponentPlayer !== 'object') {
+    return;
+  }
+
+  const nestedOpponentName = normalizeDisplayName(
+    firstDefined(opponentPlayer, ['name', 'opponent_name', 'player_name']),
+  );
+  if (nestedOpponentName !== null) {
+    state.lobbyOpponentName = nestedOpponentName;
+  }
+
+  const nestedOpponentId = firstDefined(opponentPlayer, ['id', 'player_id', 'playerId']);
+  if (nestedOpponentId !== null) {
+    state.opponentId = nestedOpponentId;
+  }
+}
+
+function applyServerBoards(message) {
+  let ownBoard = null;
+  let opponentBoard = null;
+
+  if (message.boards && typeof message.boards === 'object') {
+    ownBoard = firstDefined(message.boards, ['own', 'self', 'player', 'own_board']);
+    opponentBoard = firstDefined(message.boards, ['opponent', 'enemy', 'opponent_board']);
+  }
+
+  if (Array.isArray(message.own_board)) {
+    ownBoard = message.own_board;
+  }
+
+  if (Array.isArray(message.opponent_board)) {
+    opponentBoard = message.opponent_board;
+  }
+
+  if (ownBoard !== null) {
+    state.boards.own = normalizeBoardSnapshot(ownBoard, true);
+  }
+
+  if (opponentBoard !== null) {
+    state.boards.opponent = normalizeBoardSnapshot(opponentBoard, false);
+  }
+
+  return {
+    ownApplied: ownBoard !== null,
+    opponentApplied: opponentBoard !== null,
+  };
+}
+
+function resolveShotBoard(message, x, y) {
+  const boardHint = String(
+    firstDefined(message, ['board', 'target', 'target_board', 'board_name']) ?? '',
+  ).toLowerCase();
+
+  if (['opponent', 'enemy'].includes(boardHint)) {
+    return 'opponent';
+  }
+
+  if (['own', 'self', 'player'].includes(boardHint)) {
+    return 'own';
+  }
+
+  const shooterId = firstDefined(message, ['shooter', 'shooter_id', 'by', 'player_id']);
+  if (shooterId !== null && state.playerId !== null) {
+    return String(shooterId) === String(state.playerId) ? 'opponent' : 'own';
+  }
+
+  const targetPlayerId = firstDefined(message, ['target_player', 'target_player_id']);
+  if (targetPlayerId !== null && state.playerId !== null) {
+    return String(targetPlayerId) === String(state.playerId) ? 'own' : 'opponent';
+  }
+
+  if (state.pendingShot && state.pendingShot.x === x && state.pendingShot.y === y) {
+    return 'opponent';
+  }
+
+  return 'own';
+}
+
+function applyShotToBoard(boardName, x, y, result) {
+  if (!Number.isInteger(x) || !Number.isInteger(y)) {
+    return;
+  }
+
+  if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
+    return;
+  }
+
+  const board = boardName === 'opponent' ? state.boards.opponent : state.boards.own;
+  const cell = board[y][x];
+  cell.shot = result;
+
+  if (boardName === 'opponent' && result === 'hit') {
+    cell.hasShip = true;
+  }
+}
+
+function handleShotResult(message) {
+  const x = Number(message.x);
+  const y = Number(message.y);
+  const result = normalizeShotResult(message.result) ?? 'miss';
+
+  if (!Number.isInteger(x) || !Number.isInteger(y)) {
+    addEvent(`Shot result: ${result}`);
+    return;
+  }
+
+  const boardName = resolveShotBoard(message, x, y);
+  applyShotToBoard(boardName, x, y, result);
+
+  const wasPendingShot =
+    state.pendingShot && state.pendingShot.x === x && state.pendingShot.y === y;
+  if (wasPendingShot) {
+    state.pendingShot = null;
+  }
+
+  const explicitTurn = firstDefined(message, ['turn', 'next_turn']);
+  if (explicitTurn === null && wasPendingShot) {
+    state.turn = null;
+  }
+
+  const actor = boardName === 'opponent' ? 'You' : 'Opponent';
+  addEvent(`${actor} ${result === 'hit' ? 'hit' : 'missed'} at (${x}, ${y}).`);
+}
+
+function handleServerError(message) {
+  const errorMessage = readServerErrorMessage(message);
+  state.lastError = errorMessage;
+  addEvent(`Error: ${errorMessage}`);
+
+  state.pendingShot = null;
+  state.pendingCreatePayload = null;
+  state.pendingJoinInviteCode = null;
+  state.creatingGame = false;
+  state.joiningInvite = false;
+
+  if (state.phase === 'matched') {
+    state.waitingForMatch = false;
+    state.phase = 'lobby';
+    state.turn = null;
+    return;
+  }
+
+  if (state.phase === 'lobby') {
+    state.waitingForMatch = false;
+    return;
+  }
+
+  if (state.phase === 'placement') {
+    state.waitingForMatch = false;
+    if (state.placement.submitted) {
+      state.placement.submitted = false;
+    }
+    return;
+  }
+
+  if (state.phase === 'playing') {
+    state.waitingForMatch = false;
+    return;
+  }
+
+  if (state.phase === 'finished') {
+    state.waitingForMatch = false;
+    state.turn = null;
+    return;
+  }
+
+  state.waitingForMatch = false;
+}
+
+function handleServerMessage(message) {
+  if (!message || typeof message !== 'object') {
+    return;
+  }
+
+  if (message.type !== 'error') {
+    state.lastError = null;
+  }
+  applyServerMetadata(message);
+  applyServerParticipantNames(message);
+  const boardStatus = applyServerBoards(message);
+
+  switch (message.type) {
+    case 'connected':
+      break;
+
+    case 'invite_created': {
+      state.pendingCreatePayload = null;
+      state.creatingGame = false;
+      state.joiningInvite = false;
+      state.joinedFromInvite = false;
+      state.phase = 'lobby';
+      state.waitingForMatch = true;
+
+      const inviteCode = readInviteCodeFromMessage(message);
+      const inviteLink = buildInviteLink(inviteCode) ?? readInviteLinkFromMessage(message);
+
+      state.inviteCode = inviteCode;
+      state.inviteLink = inviteLink;
+
+      if (!state.inviteCode && inviteLink) {
+        try {
+          const parsedInviteLink =
+            typeof window !== 'undefined'
+              ? new URL(inviteLink, window.location.href)
+              : new URL(inviteLink);
+          state.inviteCode =
+            normalizeInviteCode(parsedInviteLink.searchParams.get('invite')) ??
+            normalizeInviteCode(parsedInviteLink.searchParams.get('invite_code'));
+        } catch {
+          state.inviteCode = null;
+        }
+      }
+
+      addEvent(
+        state.inviteLink
+          ? 'Invite created. Share the invite link with your opponent.'
+          : 'Invite created. Waiting for opponent...',
+      );
+      break;
+    }
+
+    case 'match_found':
+      state.pendingCreatePayload = null;
+      state.pendingJoinInviteCode = null;
+      state.creatingGame = false;
+      state.joiningInvite = false;
+      state.waitingForMatch = true;
+      state.phase = 'matched';
+      addEvent(
+        state.lobbyOpponentName
+          ? `Match found against ${state.lobbyOpponentName}. Waiting for placement phase...`
+          : 'Match found. Waiting for placement phase...',
+      );
+      break;
+
+    case 'start_placement':
+      state.waitingForMatch = false;
+      state.phase = 'placement';
+      state.creatingGame = false;
+      state.joiningInvite = false;
+      state.pendingCreatePayload = null;
+      state.pendingJoinInviteCode = null;
+      state.inviteCode = null;
+      state.inviteLink = null;
+      state.joinedFromInvite = false;
+      state.winner = null;
+      state.turn = null;
+      state.pendingShot = null;
+      state.boards.own = createBoard();
+      state.boards.opponent = createBoard();
+      resetPlacement();
+      addEvent('Placement started.');
+      break;
+
+    case 'game_start':
+      state.phase = 'playing';
+      state.waitingForMatch = false;
+      state.pendingShot = null;
+      if (!boardStatus.ownApplied) {
+        copyPlacementToOwnBoard();
+      }
+      addEvent('Game started.');
+      break;
+
+    case 'your_turn': {
+      state.phase = 'playing';
+      state.pendingShot = null;
+      const turn = firstDefined(message, ['turn', 'next_turn']);
+      state.turn = turn ?? (state.playerId ?? SELF_TURN_TOKEN);
+      addEvent('Your turn.');
+      break;
+    }
+
+    case 'shot_result':
+      handleShotResult(message);
+      break;
+
+    case 'game_over': {
+      state.phase = 'finished';
+      state.waitingForMatch = false;
+      state.pendingShot = null;
+      state.turn = null;
+      state.winner = firstDefined(message, ['winner', 'winner_id']);
+
+      const didWin =
+        state.winner !== null && state.playerId !== null
+          ? String(state.winner) === String(state.playerId)
+          : false;
+      addEvent(didWin ? 'Game over. You won!' : `Game over. Winner: ${state.winner ?? 'unknown'}.`);
+      break;
+    }
+
+    case 'error':
+      handleServerError(message);
+      break;
+
+    default:
+      break;
+  }
+}
+
+function handleOpen() {
+  state.connected = true;
+  state.connecting = false;
+  state.lastError = null;
+  addEvent('Connected to server.');
+  flushPendingLobbyActions();
+}
+
+function handleClose() {
+  const retryInviteCode =
+    ['lobby', 'matched'].includes(state.phase) && state.urlInviteCode
+      ? state.urlInviteCode
+      : null;
+
+  state.connected = false;
+  state.connecting = false;
+  resetMatchState();
+
+  if (retryInviteCode) {
+    state.inviteCode = retryInviteCode;
+    state.inviteLink = buildInviteLink(retryInviteCode);
+    state.joinedFromInvite = true;
+    state.joiningInvite = true;
+    state.waitingForMatch = true;
+    state.pendingJoinInviteCode = retryInviteCode;
+    addEvent('Disconnected from server. Reconnect to continue joining the invite.');
+    return;
+  }
+
+  addEvent('Disconnected from server.');
+}
+
+function handleError(error) {
+  const isServerErrorPayload =
+    error &&
+    typeof error === 'object' &&
+    !('target' in error) &&
+    !('currentTarget' in error) &&
+    error.type === 'error' &&
+    typeof error.message === 'string';
+
+  if (isServerErrorPayload) {
+    return;
+  }
+
+  const message =
+    error instanceof Error && error.message ? `WebSocket error: ${error.message}` : 'WebSocket error.';
+
+  state.lastError = message;
+  state.connecting = false;
+  addEvent(message);
+}
+
+function init() {
+  if (initialized) {
+    return;
+  }
+
+  initialized = true;
+  unsubscribeFns = [
+    websocketService.on('open', handleOpen),
+    websocketService.on('close', handleClose),
+    websocketService.on('error', handleError),
+    websocketService.on('message', handleServerMessage),
+  ];
+
+  const inviteCode = readInviteCodeFromLocation();
+  if (inviteCode) {
+    state.urlInviteCode = inviteCode;
+    joinGameByInvite(inviteCode, { auto: true });
+    return;
+  }
+
+  connect();
+}
+
+function destroy() {
+  unsubscribeFns.forEach((unsubscribe) => unsubscribe());
+  unsubscribeFns = [];
+  initialized = false;
+  websocketService.close();
+}
+
+const store = {
+  state: readonly(state),
+  init,
+  destroy,
+  connect,
+  setLobbyPlayerName,
+  setLobbyOpponentName,
+  createGame,
+  joinGameByInvite,
+  togglePlacementOrientation,
+  resetPlacementBoard,
+  placeShip,
+  submitShips,
+  shoot,
+  allShipsPlaced,
+  nextShipLength,
+  isMyTurn,
+};
+
+export function useGameStore() {
+  return store;
+}

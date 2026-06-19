@@ -1,0 +1,1 @@
+# Battleships backend app package.
