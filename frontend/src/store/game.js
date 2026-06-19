@@ -34,6 +34,123 @@ function firstDefined(source, keys) {
   return null;
 }
 
+function toObject(value) {
+  return value && typeof value === 'object' ? value : null;
+}
+
+function firstDefinedFromObject(source, keys) {
+  if (!source || typeof source !== 'object') {
+    return null;
+  }
+
+  return firstDefined(source, keys);
+}
+
+function normalizeBoolean(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (['true', '1', 'yes', 'y'].includes(normalized)) {
+    return true;
+  }
+
+  if (['false', '0', 'no', 'n'].includes(normalized)) {
+    return false;
+  }
+
+  return null;
+}
+
+function normalizePlacementOrientation(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (['horizontal', 'h'].includes(normalized)) {
+    return 'horizontal';
+  }
+
+  if (['vertical', 'v'].includes(normalized)) {
+    return 'vertical';
+  }
+
+  return null;
+}
+
+function normalizePlacementShipsSnapshot(value) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  return value
+    .map((ship) => {
+      const source = toObject(ship);
+      if (!source) {
+        return null;
+      }
+
+      const x = Number(firstDefined(source, ['x', 'column', 'col']));
+      const y = Number(firstDefined(source, ['y', 'row']));
+      const length = Number(firstDefined(source, ['length', 'size']));
+      const orientation = normalizePlacementOrientation(
+        firstDefined(source, ['orientation', 'direction']),
+      );
+
+      if (
+        !Number.isInteger(x) ||
+        !Number.isInteger(y) ||
+        !Number.isInteger(length) ||
+        length <= 0 ||
+        !orientation
+      ) {
+        return null;
+      }
+
+      return { x, y, length, orientation };
+    })
+    .filter(Boolean);
+}
+
+function createPlacementBoardFromShips(ships) {
+  const board = createBoard();
+  if (!Array.isArray(ships)) {
+    return board;
+  }
+
+  for (const ship of ships) {
+    const length = Number(ship.length);
+    if (!Number.isInteger(length) || length <= 0) {
+      continue;
+    }
+
+    const orientation = normalizePlacementOrientation(ship.orientation) ?? 'horizontal';
+    const horizontal = orientation === 'horizontal';
+
+    for (let offset = 0; offset < length; offset += 1) {
+      const x = Number(ship.x) + (horizontal ? offset : 0);
+      const y = Number(ship.y) + (horizontal ? 0 : offset);
+      if (!Number.isInteger(x) || !Number.isInteger(y)) {
+        continue;
+      }
+
+      if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) {
+        continue;
+      }
+
+      board[y][x].hasShip = true;
+    }
+  }
+
+  return board;
+}
+
 function normalizeShotResult(value) {
   const normalized = String(value ?? '').toLowerCase();
   if (normalized.includes('hit') || normalized === 'sunk') {
@@ -558,28 +675,48 @@ function shoot(x, y) {
 }
 
 function applyServerMetadata(message) {
-  const playerId = firstDefined(message, ['playerId', 'player_id']);
+  const game = toObject(firstDefined(message, ['game', 'match']));
+  const player = toObject(firstDefined(message, ['player', 'self']));
+  const opponent = toObject(firstDefined(message, ['opponent', 'enemy']));
+
+  const playerId =
+    firstDefined(message, ['playerId', 'player_id']) ??
+    firstDefinedFromObject(player, ['id', 'player_id', 'playerId']);
   if (playerId !== null) {
     state.playerId = playerId;
   }
 
-  const gameId = firstDefined(message, ['gameId', 'game_id']);
+  const gameId =
+    firstDefined(message, ['gameId', 'game_id']) ??
+    firstDefinedFromObject(game, ['id', 'game_id', 'gameId']);
   if (gameId !== null) {
     state.gameId = gameId;
   }
 
-  const opponentId = firstDefined(message, ['opponentId', 'opponent_id']);
+  const opponentId =
+    firstDefined(message, ['opponentId', 'opponent_id']) ??
+    firstDefinedFromObject(opponent, ['id', 'opponent_id', 'opponentId']);
   if (opponentId !== null) {
     state.opponentId = opponentId;
   }
 
-  if (typeof message.phase === 'string') {
-    state.phase = message.phase;
+  const phase = message.phase ?? firstDefinedFromObject(game, ['phase', 'state']);
+  if (typeof phase === 'string') {
+    state.phase = phase;
   }
 
-  const turn = firstDefined(message, ['turn', 'next_turn']);
+  const turn =
+    firstDefined(message, ['turn', 'next_turn']) ??
+    firstDefinedFromObject(game, ['turn', 'next_turn', 'turn_player_id', 'turnPlayerId']);
   if (turn !== null) {
     state.turn = turn;
+  }
+
+  const winner =
+    firstDefined(message, ['winner', 'winner_id']) ??
+    firstDefinedFromObject(game, ['winner', 'winner_id', 'winnerId']);
+  if (winner !== null) {
+    state.winner = winner;
   }
 }
 
@@ -606,6 +743,9 @@ function readInviteLinkFromMessage(message) {
 }
 
 function applyServerParticipantNames(message) {
+  const player = toObject(firstDefined(message, ['player', 'self']));
+  const opponent = toObject(firstDefined(message, ['opponent', 'enemy']));
+
   const playerName = normalizeDisplayName(firstDefined(message, ['player_name', 'playerName']));
   if (playerName !== null) {
     state.lobbyPlayerName = playerName;
@@ -614,6 +754,30 @@ function applyServerParticipantNames(message) {
   const opponentName = normalizeDisplayName(firstDefined(message, ['opponent_name', 'opponentName']));
   if (opponentName !== null) {
     state.lobbyOpponentName = opponentName;
+  }
+
+  const nestedPlayerName = normalizeDisplayName(
+    firstDefinedFromObject(player, ['name', 'player_name', 'playerName']),
+  );
+  if (nestedPlayerName !== null) {
+    state.lobbyPlayerName = nestedPlayerName;
+  }
+
+  const nestedPlayerId = firstDefinedFromObject(player, ['id', 'player_id', 'playerId']);
+  if (nestedPlayerId !== null) {
+    state.playerId = nestedPlayerId;
+  }
+
+  const nestedOpponentName = normalizeDisplayName(
+    firstDefinedFromObject(opponent, ['name', 'opponent_name', 'opponentName', 'player_name']),
+  );
+  if (nestedOpponentName !== null) {
+    state.lobbyOpponentName = nestedOpponentName;
+  }
+
+  const nestedOpponentId = firstDefinedFromObject(opponent, ['id', 'player_id', 'playerId']);
+  if (nestedOpponentId !== null) {
+    state.opponentId = nestedOpponentId;
   }
 
   if (!message.players || typeof message.players !== 'object') {
@@ -628,6 +792,11 @@ function applyServerParticipantNames(message) {
     if (nestedPlayerName !== null) {
       state.lobbyPlayerName = nestedPlayerName;
     }
+
+    const nestedSelfPlayerId = firstDefined(selfPlayer, ['id', 'player_id', 'playerId']);
+    if (nestedSelfPlayerId !== null) {
+      state.playerId = nestedSelfPlayerId;
+    }
   }
 
   const opponentPlayer = firstDefined(message.players, ['opponent', 'enemy']);
@@ -635,26 +804,52 @@ function applyServerParticipantNames(message) {
     return;
   }
 
-  const nestedOpponentName = normalizeDisplayName(
+  const nestedPlayersOpponentName = normalizeDisplayName(
     firstDefined(opponentPlayer, ['name', 'opponent_name', 'player_name']),
   );
-  if (nestedOpponentName !== null) {
-    state.lobbyOpponentName = nestedOpponentName;
+  if (nestedPlayersOpponentName !== null) {
+    state.lobbyOpponentName = nestedPlayersOpponentName;
   }
 
-  const nestedOpponentId = firstDefined(opponentPlayer, ['id', 'player_id', 'playerId']);
-  if (nestedOpponentId !== null) {
-    state.opponentId = nestedOpponentId;
+  const nestedPlayersOpponentId = firstDefined(opponentPlayer, ['id', 'player_id', 'playerId']);
+  if (nestedPlayersOpponentId !== null) {
+    state.opponentId = nestedPlayersOpponentId;
   }
 }
 
 function applyServerBoards(message) {
   let ownBoard = null;
   let opponentBoard = null;
+  const game = toObject(firstDefined(message, ['game', 'match']));
+  const player = toObject(firstDefined(message, ['player', 'self']));
+  const opponent = toObject(firstDefined(message, ['opponent', 'enemy']));
 
   if (message.boards && typeof message.boards === 'object') {
     ownBoard = firstDefined(message.boards, ['own', 'self', 'player', 'own_board']);
     opponentBoard = firstDefined(message.boards, ['opponent', 'enemy', 'opponent_board']);
+  }
+
+  const gameBoards = firstDefinedFromObject(game, ['boards', 'board_state', 'boardState']);
+  if (gameBoards && typeof gameBoards === 'object') {
+    if (ownBoard === null) {
+      ownBoard = firstDefined(gameBoards, ['own', 'self', 'player', 'own_board']);
+    }
+
+    if (opponentBoard === null) {
+      opponentBoard = firstDefined(gameBoards, ['opponent', 'enemy', 'opponent_board']);
+    }
+  }
+
+  if (ownBoard === null) {
+    ownBoard =
+      firstDefinedFromObject(player, ['board', 'own_board', 'ownBoard']) ??
+      firstDefined(message, ['ownBoard']);
+  }
+
+  if (opponentBoard === null) {
+    opponentBoard =
+      firstDefinedFromObject(opponent, ['board', 'opponent_board', 'opponentBoard']) ??
+      firstDefined(message, ['opponentBoard']);
   }
 
   if (Array.isArray(message.own_board)) {
@@ -665,17 +860,20 @@ function applyServerBoards(message) {
     opponentBoard = message.opponent_board;
   }
 
-  if (ownBoard !== null) {
+  const ownApplied = Array.isArray(ownBoard);
+  const opponentApplied = Array.isArray(opponentBoard);
+
+  if (ownApplied) {
     state.boards.own = normalizeBoardSnapshot(ownBoard, true);
   }
 
-  if (opponentBoard !== null) {
+  if (opponentApplied) {
     state.boards.opponent = normalizeBoardSnapshot(opponentBoard, false);
   }
 
   return {
-    ownApplied: ownBoard !== null,
-    opponentApplied: opponentBoard !== null,
+    ownApplied,
+    opponentApplied,
   };
 }
 
@@ -800,6 +998,167 @@ function handleServerError(message) {
   state.waitingForMatch = false;
 }
 
+function applyStateSync(message, boardStatus) {
+  const game = toObject(firstDefined(message, ['game', 'match']));
+  const player = toObject(firstDefined(message, ['player', 'self']));
+  const placement = toObject(firstDefined(message, ['placement', 'placement_state', 'placementState']));
+  const invite = toObject(firstDefined(message, ['invite']));
+
+  const syncedTurn =
+    firstDefined(message, ['turn', 'next_turn']) ??
+    firstDefinedFromObject(game, ['turn', 'next_turn', 'turn_player_id', 'turnPlayerId']);
+  const syncedWinner =
+    firstDefined(message, ['winner', 'winner_id']) ??
+    firstDefinedFromObject(game, ['winner', 'winner_id', 'winnerId']);
+
+  state.winner = syncedWinner;
+  state.turn = state.phase === 'finished' ? null : syncedTurn;
+
+  const syncedOrientation = normalizePlacementOrientation(
+    firstDefinedFromObject(placement, ['orientation']) ??
+      firstDefined(message, ['placement_orientation', 'placementOrientation']),
+  );
+  if (syncedOrientation) {
+    state.placement.orientation = syncedOrientation;
+  }
+
+  const syncedPlacementSubmitted = normalizeBoolean(
+    firstDefined(message, ['placement_submitted', 'placementSubmitted', 'ships_placed', 'shipsPlaced']) ??
+      firstDefinedFromObject(placement, [
+        'submitted',
+        'placement_submitted',
+        'placementSubmitted',
+        'ships_placed',
+        'shipsPlaced',
+      ]) ??
+      firstDefinedFromObject(player, [
+        'placement_submitted',
+        'placementSubmitted',
+        'ships_placed',
+        'shipsPlaced',
+        'submitted',
+      ]) ??
+      firstDefinedFromObject(game, ['placement_submitted', 'placementSubmitted']),
+  );
+  if (syncedPlacementSubmitted !== null) {
+    state.placement.submitted = syncedPlacementSubmitted;
+  } else if (state.phase !== 'placement') {
+    state.placement.submitted = false;
+  }
+
+  const syncedShips = normalizePlacementShipsSnapshot(
+    firstDefinedFromObject(placement, ['ships', 'placements']) ??
+      firstDefinedFromObject(player, ['placement_ships', 'placementShips', 'ships']) ??
+      firstDefined(message, ['placement_ships', 'placementShips']),
+  );
+
+  if (syncedShips !== null) {
+    state.placement.ships = syncedShips;
+    state.placement.nextShipIndex = Math.min(syncedShips.length, SHIP_LENGTHS.length);
+  } else if (state.phase === 'placement') {
+    state.placement.ships = [];
+    state.placement.nextShipIndex = state.placement.submitted ? SHIP_LENGTHS.length : 0;
+  } else if (state.phase !== 'placement') {
+    state.placement.ships = [];
+    state.placement.nextShipIndex = 0;
+  }
+
+  const syncedPlacementBoard =
+    firstDefinedFromObject(placement, ['board', 'placement_board', 'placementBoard']) ??
+    firstDefinedFromObject(player, ['placement_board', 'placementBoard']) ??
+    firstDefined(message, ['placement_board', 'placementBoard']);
+
+  if (Array.isArray(syncedPlacementBoard)) {
+    state.placement.board = normalizeBoardSnapshot(syncedPlacementBoard, true);
+  } else if (state.phase === 'placement' && boardStatus.ownApplied) {
+    state.placement.board = cloneBoard(state.boards.own);
+  } else if (state.phase === 'placement' && syncedShips !== null) {
+    state.placement.board = createPlacementBoardFromShips(syncedShips);
+  } else if (state.phase !== 'placement') {
+    state.placement.board = createBoard();
+  }
+
+  if (state.phase === 'placement' && state.placement.submitted) {
+    state.placement.nextShipIndex = SHIP_LENGTHS.length;
+  }
+
+  const inviteCodeFromSync =
+    readInviteCodeFromMessage(message) ??
+    normalizeInviteCode(firstDefinedFromObject(invite, ['code', 'invite_code', 'inviteCode']));
+  const inviteLinkFromSync = readInviteLinkFromMessage(message) ?? readInviteLinkFromMessage(invite ?? {});
+
+  if (inviteCodeFromSync !== null) {
+    state.inviteCode = inviteCodeFromSync;
+  }
+
+  if (inviteLinkFromSync !== null) {
+    state.inviteLink = inviteLinkFromSync;
+  } else if (inviteCodeFromSync !== null) {
+    state.inviteLink = buildInviteLink(inviteCodeFromSync);
+  }
+
+  const joinedFromInvite = normalizeBoolean(
+    firstDefined(message, ['joined_from_invite', 'joinedFromInvite']) ??
+      firstDefinedFromObject(invite, ['joined_from_invite', 'joinedFromInvite']),
+  );
+  if (joinedFromInvite !== null) {
+    state.joinedFromInvite = joinedFromInvite;
+  }
+
+  const hasRestorableMatch =
+    Boolean(state.gameId) || ['matched', 'placement', 'playing', 'finished'].includes(state.phase);
+
+  if (hasRestorableMatch) {
+    state.pendingCreatePayload = null;
+    state.pendingJoinInviteCode = null;
+    state.creatingGame = false;
+    state.joiningInvite = false;
+    state.waitingForMatch = state.phase === 'matched' || (state.phase === 'lobby' && Boolean(state.gameId));
+
+    if (['placement', 'playing', 'finished'].includes(state.phase)) {
+      state.inviteCode = null;
+      state.inviteLink = null;
+      state.joinedFromInvite = false;
+    }
+  } else {
+    const hasPendingLobbyAction = Boolean(
+      state.pendingCreatePayload ||
+        state.pendingJoinInviteCode ||
+        state.creatingGame ||
+        state.joiningInvite,
+    );
+
+    const waitingFromSync = normalizeBoolean(
+      firstDefined(message, ['waiting_for_match', 'waitingForMatch']) ??
+        firstDefinedFromObject(game, ['waiting_for_match', 'waitingForMatch']),
+    );
+    if (waitingFromSync !== null) {
+      state.waitingForMatch = waitingFromSync || hasPendingLobbyAction;
+    } else {
+      state.waitingForMatch = Boolean(
+        state.inviteCode ||
+          state.inviteLink ||
+          state.pendingCreatePayload ||
+          state.pendingJoinInviteCode ||
+          state.creatingGame ||
+          state.joiningInvite,
+      );
+    }
+
+    const creatingFromSync = normalizeBoolean(firstDefined(message, ['creating_game', 'creatingGame']));
+    if (creatingFromSync !== null) {
+      state.creatingGame = creatingFromSync;
+    }
+
+    const joiningFromSync = normalizeBoolean(firstDefined(message, ['joining_invite', 'joiningInvite']));
+    if (joiningFromSync !== null) {
+      state.joiningInvite = joiningFromSync;
+    }
+  }
+
+  state.pendingShot = null;
+}
+
 function handleServerMessage(message) {
   if (!message || typeof message !== 'object') {
     return;
@@ -814,6 +1173,11 @@ function handleServerMessage(message) {
 
   switch (message.type) {
     case 'connected':
+      break;
+
+    case 'state_sync':
+      applyStateSync(message, boardStatus);
+      addEvent('Session restored from server state.');
       break;
 
     case 'invite_created': {
@@ -941,27 +1305,49 @@ function handleOpen() {
 }
 
 function handleClose() {
-  const retryInviteCode =
-    ['lobby', 'matched'].includes(state.phase) && state.urlInviteCode
-      ? state.urlInviteCode
-      : null;
-
   state.connected = false;
   state.connecting = false;
-  resetMatchState();
+  state.pendingShot = null;
 
-  if (retryInviteCode) {
-    state.inviteCode = retryInviteCode;
-    state.inviteLink = buildInviteLink(retryInviteCode);
-    state.joinedFromInvite = true;
-    state.joiningInvite = true;
-    state.waitingForMatch = true;
-    state.pendingJoinInviteCode = retryInviteCode;
+  const hasRestorableSession =
+    Boolean(state.gameId) ||
+    ['matched', 'placement', 'playing', 'finished'].includes(state.phase) ||
+    Boolean(
+      state.inviteCode ||
+        state.inviteLink ||
+        state.pendingCreatePayload ||
+        state.pendingJoinInviteCode ||
+        state.creatingGame ||
+        state.joiningInvite,
+    );
+
+  if (!hasRestorableSession) {
+    addEvent('Disconnected from server.');
+    return;
+  }
+
+  if (state.pendingJoinInviteCode || state.joiningInvite || state.urlInviteCode) {
+    const retryInviteCode = state.pendingJoinInviteCode ?? state.urlInviteCode ?? state.inviteCode;
+    if (retryInviteCode) {
+      state.inviteCode = retryInviteCode;
+      state.inviteLink = state.inviteLink ?? buildInviteLink(retryInviteCode);
+      state.joinedFromInvite = true;
+      state.joiningInvite = true;
+      state.waitingForMatch = true;
+      state.pendingJoinInviteCode = retryInviteCode;
+    }
     addEvent('Disconnected from server. Reconnect to continue joining the invite.');
     return;
   }
 
-  addEvent('Disconnected from server.');
+  if (state.pendingCreatePayload || state.creatingGame) {
+    state.creatingGame = true;
+    state.waitingForMatch = true;
+    addEvent('Disconnected from server. Reconnect to continue creating the invite.');
+    return;
+  }
+
+  addEvent('Disconnected from server. Reconnect to restore your session.');
 }
 
 function handleError(error) {

@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 Coordinate = tuple[int, int]
+BoardSnapshotCell = str | None
+BoardSnapshot = list[list[BoardSnapshotCell]]
 
 
 class GamePhase(str, Enum):
@@ -93,6 +95,21 @@ class DisconnectOutcome:
     disconnected_player_id: str
     opponent_id: str | None
     winner_id: str | None
+
+
+@dataclass(slots=True)
+class StateSyncSnapshot:
+    game_id: str
+    phase: GamePhase
+    player_id: str
+    opponent_id: str
+    player_name: str
+    opponent_name: str
+    turn_player_id: str | None
+    winner_id: str | None
+    own_board: BoardSnapshot
+    opponent_board: BoardSnapshot
+    ships_submitted: bool
 
 
 @dataclass(slots=True)

@@ -121,3 +121,32 @@ class ErrorEvent(BaseModel):
 
     type: Literal["error"] = "error"
     message: str
+
+
+SnapshotCell = Literal["ship", "hit", "miss"] | None
+
+
+class ConnectedEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["connected"] = "connected"
+    player_id: str
+    session_id: str
+    resumed: bool = False
+
+
+class StateSyncEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["state_sync"] = "state_sync"
+    game_id: str
+    phase: Literal["lobby", "placement", "playing", "finished"]
+    player_id: str
+    opponent_id: str
+    player_name: str
+    opponent_name: str
+    turn: str | None = None
+    winner: str | None = None
+    own_board: list[list[SnapshotCell]]
+    opponent_board: list[list[SnapshotCell]]
+    ships_submitted: bool

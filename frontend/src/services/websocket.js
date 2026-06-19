@@ -1,5 +1,85 @@
 const DEFAULT_WS_URL = 'ws://localhost:8000/ws';
 const PROXY_WS_PATH = '/ws';
+const SESSION_ID_STORAGE_KEY = 'battleships.session_id';
+const SESSION_ID_QUERY_PARAM = 'session_id';
+
+function normalizeSessionId(value) {
+  const normalized = String(value ?? '').trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function generateSessionId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function readStoredSessionId() {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return null;
+  }
+
+  try {
+    return normalizeSessionId(window.localStorage.getItem(SESSION_ID_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function persistSessionId(sessionId) {
+  if (typeof window === 'undefined' || !window.localStorage || !sessionId) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(SESSION_ID_STORAGE_KEY, sessionId);
+  } catch {
+    // Ignore storage write errors (private mode / quota)
+  }
+}
+
+function resolveClientSessionId() {
+  const existing = readStoredSessionId();
+  if (existing) {
+    return existing;
+  }
+
+  const generated = generateSessionId();
+  persistSessionId(generated);
+  return generated;
+}
+
+function resolveWsBaseForRelativeUrls() {
+  if (typeof window === 'undefined' || !window.location?.host) {
+    return DEFAULT_WS_URL;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}`;
+}
+
+function buildSessionAwareUrl(url, sessionId) {
+  const normalizedUrl = String(url ?? '').trim();
+  const baseUrl = normalizedUrl.length > 0 ? normalizedUrl : resolveWsUrl();
+
+  if (!sessionId) {
+    return baseUrl;
+  }
+
+  try {
+    const hasProtocol = /^[a-z][a-z\d+.-]*:/i.test(baseUrl);
+    const parsedUrl = hasProtocol
+      ? new URL(baseUrl)
+      : new URL(baseUrl, resolveWsBaseForRelativeUrls());
+    parsedUrl.searchParams.set(SESSION_ID_QUERY_PARAM, sessionId);
+    return parsedUrl.toString();
+  } catch {
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    return `${baseUrl}${separator}${SESSION_ID_QUERY_PARAM}=${encodeURIComponent(sessionId)}`;
+  }
+}
 
 function resolveProductionWsUrl() {
   if (typeof window === 'undefined' || !window.location?.host) {
@@ -25,18 +105,32 @@ function resolveWsUrl() {
 
 class WebSocketService {
   constructor() {
-    this.url = resolveWsUrl();
+    this.baseUrl = resolveWsUrl();
+    this.sessionId = resolveClientSessionId();
+    this.url = buildSessionAwareUrl(this.baseUrl, this.sessionId);
     this.socket = null;
     this.listeners = new Map();
   }
 
-  connect(url = this.url) {
+  setSessionId(sessionId) {
+    const normalizedSessionId = normalizeSessionId(sessionId);
+    if (!normalizedSessionId) {
+      return;
+    }
+
+    this.sessionId = normalizedSessionId;
+    persistSessionId(normalizedSessionId);
+    this.url = buildSessionAwareUrl(this.baseUrl, this.sessionId);
+  }
+
+  connect(url = this.baseUrl) {
     const currentState = this.socket?.readyState;
     if (currentState === WebSocket.OPEN || currentState === WebSocket.CONNECTING) {
       return;
     }
 
-    this.url = url || resolveWsUrl();
+    this.baseUrl = url || resolveWsUrl();
+    this.url = buildSessionAwareUrl(this.baseUrl, this.sessionId);
     this.socket = new WebSocket(this.url);
 
     this.socket.addEventListener('open', (event) => {
@@ -54,6 +148,13 @@ class WebSocketService {
     this.socket.addEventListener('message', (event) => {
       try {
         const payload = JSON.parse(event.data);
+        const sessionIdFromServer = normalizeSessionId(
+          payload?.session_id ?? payload?.sessionId ?? payload?.client_session_id ?? payload?.clientSessionId,
+        );
+        if (sessionIdFromServer && sessionIdFromServer !== this.sessionId) {
+          this.setSessionId(sessionIdFromServer);
+        }
+
         this.emit('message', payload);
 
         if (payload?.type) {

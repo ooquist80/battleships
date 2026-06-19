@@ -5,6 +5,7 @@ import random
 import uuid
 
 from app.models import (
+    BoardSnapshot,
     DisconnectOutcome,
     GamePhase,
     GameState,
@@ -12,6 +13,7 @@ from app.models import (
     PlacementOutcome,
     PlayerState,
     ShipState,
+    StateSyncSnapshot,
     ShotOutcome,
     ShotResult,
 )
@@ -28,9 +30,45 @@ class GameManager:
         self._board_size = board_size
         self._games: dict[str, GameState] = {}
         self._player_to_game: dict[str, str] = {}
+        self._pending_disconnects: dict[str, str] = {}
         self._pending_invites: dict[str, PendingInvite] = {}
         self._creator_to_invite: dict[str, str] = {}
         self._lock = asyncio.Lock()
+
+    async def build_state_sync_snapshot(self, player_id: str) -> StateSyncSnapshot | None:
+        async with self._lock:
+            game = self._game_for_player_unlocked(player_id)
+            if game is None:
+                return None
+
+            opponent_id = game.opponent_id(player_id)
+            if opponent_id is None:
+                return None
+
+            player_state = game.player_states.get(player_id)
+            opponent_state = game.player_states.get(opponent_id)
+            if player_state is None or opponent_state is None:
+                raise RuntimeError("Game state is inconsistent for connected player.")
+
+            return StateSyncSnapshot(
+                game_id=game.game_id,
+                phase=game.phase,
+                player_id=player_id,
+                opponent_id=opponent_id,
+                player_name=game.player_names.get(player_id, player_id),
+                opponent_name=game.player_names.get(opponent_id, opponent_id),
+                turn_player_id=game.turn_player_id,
+                winner_id=game.winner_id,
+                own_board=self._build_own_board_snapshot_unlocked(
+                    player_state=player_state,
+                    opponent_state=opponent_state,
+                ),
+                opponent_board=self._build_opponent_board_snapshot_unlocked(
+                    player_state=player_state,
+                    opponent_state=opponent_state,
+                ),
+                ships_submitted=player_state.ships_placed,
+            )
 
     async def is_player_in_game(self, player_id: str) -> bool:
         async with self._lock:
@@ -220,25 +258,47 @@ class GameManager:
             if game is not None:
                 self._remove_game_unlocked(game)
 
-    async def handle_disconnect(self, player_id: str) -> DisconnectOutcome | None:
+    async def begin_disconnect_grace(self, player_id: str) -> str | None:
         async with self._lock:
             game = self._game_for_player_unlocked(player_id)
             if game is None:
                 return None
 
-            opponent_id = game.opponent_id(player_id)
-            winner_id = game.winner_id
-            if game.phase != GamePhase.FINISHED and opponent_id is not None:
-                game.phase = GamePhase.FINISHED
-                game.winner_id = opponent_id
-                winner_id = opponent_id
+            disconnect_token = uuid.uuid4().hex
+            self._pending_disconnects[player_id] = disconnect_token
+            return disconnect_token
 
-            outcome = DisconnectOutcome(
-                game_id=game.game_id,
-                disconnected_player_id=player_id,
-                opponent_id=opponent_id,
-                winner_id=winner_id,
-            )
+    async def cancel_disconnect_grace(self, player_id: str) -> None:
+        async with self._lock:
+            self._pending_disconnects.pop(player_id, None)
+
+    async def finalize_disconnect_grace(
+        self,
+        player_id: str,
+        disconnect_token: str,
+    ) -> DisconnectOutcome | None:
+        async with self._lock:
+            pending_token = self._pending_disconnects.get(player_id)
+            if pending_token != disconnect_token:
+                return None
+
+            self._pending_disconnects.pop(player_id, None)
+            game = self._game_for_player_unlocked(player_id)
+            if game is None:
+                return None
+
+            outcome = self._disconnect_outcome_unlocked(game, disconnected_player_id=player_id)
+            self._remove_game_unlocked(game)
+            return outcome
+
+    async def handle_disconnect(self, player_id: str) -> DisconnectOutcome | None:
+        async with self._lock:
+            self._pending_disconnects.pop(player_id, None)
+            game = self._game_for_player_unlocked(player_id)
+            if game is None:
+                return None
+
+            outcome = self._disconnect_outcome_unlocked(game, disconnected_player_id=player_id)
             self._remove_game_unlocked(game)
             return outcome
 
@@ -322,6 +382,64 @@ class GameManager:
         self._games.pop(game.game_id, None)
         for player_id in game.players:
             self._player_to_game.pop(player_id, None)
+            self._pending_disconnects.pop(player_id, None)
+
+    def _disconnect_outcome_unlocked(
+        self,
+        game: GameState,
+        *,
+        disconnected_player_id: str,
+    ) -> DisconnectOutcome:
+        opponent_id = game.opponent_id(disconnected_player_id)
+        winner_id = game.winner_id
+        if game.phase != GamePhase.FINISHED and opponent_id is not None:
+            game.phase = GamePhase.FINISHED
+            game.winner_id = opponent_id
+            winner_id = opponent_id
+
+        return DisconnectOutcome(
+            game_id=game.game_id,
+            disconnected_player_id=disconnected_player_id,
+            opponent_id=opponent_id,
+            winner_id=winner_id,
+        )
+
+    def _empty_board_snapshot_unlocked(self) -> BoardSnapshot:
+        return [[None for _ in range(self._board_size)] for _ in range(self._board_size)]
+
+    def _build_own_board_snapshot_unlocked(
+        self,
+        *,
+        player_state: PlayerState,
+        opponent_state: PlayerState,
+    ) -> BoardSnapshot:
+        board = self._empty_board_snapshot_unlocked()
+
+        for x, y in player_state.occupied_cells:
+            if in_bounds(x, y, board_size=self._board_size):
+                board[y][x] = "ship"
+
+        for x, y in opponent_state.shots_fired:
+            if not in_bounds(x, y, board_size=self._board_size):
+                continue
+            board[y][x] = "hit" if (x, y) in player_state.occupied_cells else "miss"
+
+        return board
+
+    def _build_opponent_board_snapshot_unlocked(
+        self,
+        *,
+        player_state: PlayerState,
+        opponent_state: PlayerState,
+    ) -> BoardSnapshot:
+        board = self._empty_board_snapshot_unlocked()
+
+        for x, y in player_state.shots_fired:
+            if not in_bounds(x, y, board_size=self._board_size):
+                continue
+            board[y][x] = "hit" if (x, y) in opponent_state.occupied_cells else "miss"
+
+        return board
 
     @staticmethod
     def _normalize_invite_code(invite_code: str) -> str:

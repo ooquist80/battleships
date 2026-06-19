@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import os
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from app.connection_manager import ConnectionManager
 from app.game_manager import GameActionError, GameManager
 from app.schemas import (
+    ConnectedEvent,
     CreateGameMessage,
     ErrorEvent,
     GameOverEvent,
@@ -16,6 +20,7 @@ from app.schemas import (
     PlaceShipsMessage,
     ShootMessage,
     ShotResultEvent,
+    StateSyncEvent,
     StartPlacementEvent,
     YourTurnEvent,
     parse_client_message,
@@ -26,9 +31,104 @@ connections = ConnectionManager()
 games = GameManager()
 
 
+def resolve_disconnect_grace_seconds() -> int:
+    raw_value = os.getenv("DISCONNECT_GRACE_SECONDS", "60").strip()
+    try:
+        grace_seconds = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(
+            "DISCONNECT_GRACE_SECONDS must be an integer number of seconds.",
+        ) from exc
+
+    if grace_seconds < 0:
+        raise RuntimeError("DISCONNECT_GRACE_SECONDS must be 0 or greater.")
+    return grace_seconds
+
+
+DISCONNECT_GRACE_SECONDS = resolve_disconnect_grace_seconds()
+
+_disconnect_tasks: dict[str, asyncio.Task[None]] = {}
+_disconnect_tasks_lock = asyncio.Lock()
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+async def cancel_disconnect_forfeit(player_id: str) -> None:
+    await games.cancel_disconnect_grace(player_id)
+
+    async with _disconnect_tasks_lock:
+        task = _disconnect_tasks.pop(player_id, None)
+    if task is not None:
+        task.cancel()
+
+
+async def _run_disconnect_forfeit(player_id: str, disconnect_token: str) -> None:
+    try:
+        await asyncio.sleep(DISCONNECT_GRACE_SECONDS)
+        disconnect_outcome = await games.finalize_disconnect_grace(
+            player_id=player_id,
+            disconnect_token=disconnect_token,
+        )
+        if disconnect_outcome is None or disconnect_outcome.opponent_id is None:
+            return
+
+        await connections.send(
+            disconnect_outcome.opponent_id,
+            GameOverEvent(
+                game_id=disconnect_outcome.game_id,
+                winner=disconnect_outcome.winner_id,
+                reason="opponent_disconnected",
+            ).model_dump(exclude_none=True),
+        )
+    except asyncio.CancelledError:
+        return
+    finally:
+        async with _disconnect_tasks_lock:
+            if _disconnect_tasks.get(player_id) is asyncio.current_task():
+                _disconnect_tasks.pop(player_id, None)
+
+
+async def schedule_disconnect_forfeit(player_id: str) -> None:
+    disconnect_token = await games.begin_disconnect_grace(player_id)
+    if disconnect_token is None:
+        return
+
+    task = asyncio.create_task(
+        _run_disconnect_forfeit(player_id=player_id, disconnect_token=disconnect_token),
+        name=f"disconnect-forfeit-{player_id}",
+    )
+    async with _disconnect_tasks_lock:
+        existing_task = _disconnect_tasks.get(player_id)
+        _disconnect_tasks[player_id] = task
+
+    if existing_task is not None:
+        existing_task.cancel()
+
+
+async def send_state_sync(player_id: str) -> None:
+    snapshot = await games.build_state_sync_snapshot(player_id)
+    if snapshot is None:
+        return
+
+    await connections.send(
+        player_id,
+        StateSyncEvent(
+            game_id=snapshot.game_id,
+            phase=snapshot.phase.value,
+            player_id=snapshot.player_id,
+            opponent_id=snapshot.opponent_id,
+            player_name=snapshot.player_name,
+            opponent_name=snapshot.opponent_name,
+            turn=snapshot.turn_player_id,
+            winner=snapshot.winner_id,
+            own_board=snapshot.own_board,
+            opponent_board=snapshot.opponent_board,
+            ships_submitted=snapshot.ships_submitted,
+        ).model_dump(exclude_none=True),
+    )
 
 
 async def handle_create_game(player_id: str, message: CreateGameMessage) -> None:
@@ -130,8 +230,23 @@ async def handle_shoot(player_id: str, message: ShootMessage) -> None:
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    player_id = await connections.connect(websocket)
-    await connections.send(player_id, {"type": "connected", "player_id": player_id})
+    connection_context = await connections.connect(
+        websocket,
+        session_id=websocket.query_params.get("session_id"),
+    )
+    player_id = connection_context.player_id
+    connection_id = connection_context.connection_id
+
+    await cancel_disconnect_forfeit(player_id)
+    await connections.send(
+        player_id,
+        ConnectedEvent(
+            player_id=player_id,
+            session_id=connection_context.session_id,
+            resumed=connection_context.resumed,
+        ).model_dump(),
+    )
+    await send_state_sync(player_id)
 
     try:
         while True:
@@ -170,15 +285,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        await connections.disconnect(player_id)
+        did_disconnect = await connections.disconnect(
+            player_id,
+            connection_id=connection_id,
+        )
+        if not did_disconnect:
+            return
+
         await games.cancel_pending_invite(player_id)
-        disconnect_outcome = await games.handle_disconnect(player_id)
-        if disconnect_outcome is not None and disconnect_outcome.opponent_id is not None:
-            await connections.send(
-                disconnect_outcome.opponent_id,
-                GameOverEvent(
-                    game_id=disconnect_outcome.game_id,
-                    winner=disconnect_outcome.winner_id,
-                    reason="opponent_disconnected",
-                ).model_dump(exclude_none=True),
-            )
+        await schedule_disconnect_forfeit(player_id)

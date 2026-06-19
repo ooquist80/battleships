@@ -3,6 +3,8 @@ services:
     build:
       context: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level ${BACKEND_LOG_LEVEL:-info}
+    environment:
+      DISCONNECT_GRACE_SECONDS: ${DISCONNECT_GRACE_SECONDS:-60}
     restart: unless-stopped
     expose:
       - "8000"
