@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import Board from './Board.vue';
 import { SHIP_LENGTHS, useGameStore } from '../store/game';
 
@@ -123,12 +123,20 @@ const eventCards = computed(() =>
   })),
 );
 
+const activeMobileBoard = ref('opponent');
+
 function onPlacementCellSelect({ x, y }) {
   game.placeShip(x, y);
 }
 
 function onShotSelect({ x, y }) {
   game.shoot(x, y);
+}
+
+function setActiveMobileBoard(boardName) {
+  if (boardName === 'own' || boardName === 'opponent') {
+    activeMobileBoard.value = boardName;
+  }
 }
 </script>
 
@@ -238,7 +246,51 @@ function onShotSelect({ x, y }) {
       </ul>
       </template>
       <template v-else>
-      <div class="grid grid-cols-2 gap-2 sm:gap-3 lg:gap-4">
+      <div class="mb-2 flex items-center gap-2 sm:hidden">
+        <button
+          type="button"
+          class="flex-1 rounded-lg border px-3 py-1.5 text-sm font-semibold transition"
+          :class="
+            activeMobileBoard === 'own'
+              ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+              : 'border-slate-200 bg-white text-slate-600'
+          "
+          @click="setActiveMobileBoard('own')"
+        >
+          Your board
+        </button>
+        <button
+          type="button"
+          class="flex-1 rounded-lg border px-3 py-1.5 text-sm font-semibold transition"
+          :class="
+            activeMobileBoard === 'opponent'
+              ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+              : 'border-slate-200 bg-white text-slate-600'
+          "
+          @click="setActiveMobileBoard('opponent')"
+        >
+          Opponent board
+        </button>
+      </div>
+
+      <div class="sm:hidden">
+        <Board
+          v-if="activeMobileBoard === 'own'"
+          title="Your board"
+          :board="state.boards.own"
+          :reveal-ships="true"
+        />
+        <Board
+          v-else
+          title="Opponent board"
+          :board="state.boards.opponent"
+          :interactive="isMyTurn && state.phase === 'playing' && !state.pendingShot"
+          :pending-shot="state.pendingShot"
+          @cell-select="onShotSelect"
+        />
+      </div>
+
+      <div class="hidden grid-cols-2 gap-2 sm:grid sm:gap-3 lg:gap-4">
         <Board title="Your board" :board="state.boards.own" :reveal-ships="true" :compact="true" />
         <Board
           title="Opponent board"
