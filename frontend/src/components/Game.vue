@@ -207,8 +207,8 @@ function setActiveMobileBoard(boardName) {
       </div>
     </aside>
 
-    <section class="order-1 space-y-4 xl:order-2">
-      <div class="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-4 text-white shadow-[0_22px_45px_-30px_rgba(15,23,42,0.9)] sm:px-5">
+    <section class="order-1 flex flex-col gap-4 xl:order-2">
+      <div class="order-2 sm:order-1 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-4 text-white shadow-[0_22px_45px_-30px_rgba(15,23,42,0.9)] sm:px-5">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-indigo-200">Game status</p>
@@ -221,6 +221,7 @@ function setActiveMobileBoard(boardName) {
       </div>
       </div>
 
+      <div class="order-1 sm:order-2 space-y-4">
       <template v-if="state.phase === 'placement'">
       <Board
         title="Deployment board"
@@ -306,6 +307,7 @@ function setActiveMobileBoard(boardName) {
         {{ winnerText }}
       </p>
       </template>
+      </div>
     </section>
 
     <aside class="order-3 hidden space-y-4 xl:block">
