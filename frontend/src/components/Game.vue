@@ -134,7 +134,7 @@ function onShotSelect({ x, y }) {
 
 <template>
   <section class="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
-    <aside class="space-y-4">
+    <aside class="order-2 space-y-4 xl:order-1">
       <div class="ui-card space-y-4 p-4">
       <p class="ui-card-title">Players</p>
       <article class="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -199,7 +199,7 @@ function onShotSelect({ x, y }) {
       </div>
     </aside>
 
-    <section class="space-y-4">
+    <section class="order-1 space-y-4 xl:order-2">
       <div class="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-4 text-white shadow-[0_22px_45px_-30px_rgba(15,23,42,0.9)] sm:px-5">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -238,11 +238,12 @@ function onShotSelect({ x, y }) {
       </ul>
       </template>
       <template v-else>
-      <div class="grid gap-4 2xl:grid-cols-2">
-        <Board title="Your board" :board="state.boards.own" :reveal-ships="true" />
+      <div class="grid grid-cols-2 gap-2 sm:gap-3 lg:gap-4">
+        <Board title="Your board" :board="state.boards.own" :reveal-ships="true" :compact="true" />
         <Board
           title="Opponent board"
           :board="state.boards.opponent"
+          :compact="true"
           :interactive="isMyTurn && state.phase === 'playing' && !state.pendingShot"
           :pending-shot="state.pendingShot"
           @cell-select="onShotSelect"
@@ -255,7 +256,7 @@ function onShotSelect({ x, y }) {
       </template>
     </section>
 
-    <aside class="space-y-4">
+    <aside class="order-3 hidden space-y-4 xl:block">
       <div class="ui-card p-4">
       <div class="flex items-center justify-between gap-3">
         <p class="ui-card-title">Match activity</p>

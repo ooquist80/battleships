@@ -23,6 +23,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  compact: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(['cell-select']);
@@ -40,6 +44,28 @@ const columnLabels = computed(() =>
 
 const rowLabels = computed(() =>
   Array.from({ length: boardSize.value }, (_, index) => boardSize.value - index),
+);
+
+const boardCardClasses = computed(() =>
+  props.compact
+    ? 'ui-card flex w-full flex-col gap-2 p-1.5 sm:p-2.5 md:gap-3 md:p-4'
+    : 'ui-card flex w-full flex-col gap-3 p-3 sm:p-4',
+);
+
+const boardFrameClasses = computed(() =>
+  props.compact
+    ? 'mx-auto w-fit rounded-xl border border-slate-700/80 bg-[#111827] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)] sm:p-1.5 md:rounded-2xl md:p-3'
+    : 'mx-auto w-fit rounded-2xl border border-slate-700/80 bg-[#111827] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)] sm:p-3',
+);
+
+const boardGapClasses = computed(() => (props.compact ? 'gap-px sm:gap-0.5' : 'gap-0.5'));
+const axisLabelRowClasses = computed(() =>
+  props.compact ? 'mb-1 hidden items-center gap-px pl-4 md:flex' : 'mb-1 hidden items-center gap-0.5 pl-5 sm:flex',
+);
+const rowLabelClasses = computed(() =>
+  props.compact
+    ? 'hidden w-4 text-center text-[9px] font-semibold text-slate-400 md:block'
+    : 'hidden w-5 text-center text-[10px] font-semibold text-slate-400 sm:block',
 );
 
 function isPendingCell(x, y) {
@@ -64,46 +90,47 @@ function onCellSelect(x, y) {
 </script>
 
 <template>
-  <section class="ui-card flex w-full flex-col gap-3 p-3 sm:p-4">
+  <section :class="boardCardClasses">
     <h3 v-if="title" class="text-sm font-semibold uppercase tracking-wide text-slate-500">{{ title }}</h3>
 
     <div class="overflow-x-auto">
-      <div class="mx-auto w-fit rounded-2xl border border-slate-700/80 bg-[#111827] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)] sm:p-3">
-        <div class="mb-1 hidden items-center gap-0.5 pl-5 sm:flex">
+      <div :class="boardFrameClasses">
+        <div :class="axisLabelRowClasses">
           <span
             v-for="label in columnLabels"
             :key="`top-${label}`"
-            class="inline-flex w-6 justify-center text-[10px] font-semibold text-slate-400 sm:w-7 md:w-8"
+            class="inline-flex w-3.5 justify-center text-[9px] font-semibold text-slate-400 sm:w-5 sm:text-[10px] md:w-8"
           >
             {{ label }}
           </span>
         </div>
 
-        <div class="flex flex-col gap-0.5" role="grid">
-          <div v-for="(row, y) in board" :key="`row-${y}`" class="flex items-center gap-0.5">
-            <span class="hidden w-5 text-center text-[10px] font-semibold text-slate-400 sm:block">
+        <div class="flex flex-col" :class="boardGapClasses" role="grid">
+          <div v-for="(row, y) in board" :key="`row-${y}`" class="flex items-center" :class="boardGapClasses">
+            <span :class="rowLabelClasses">
               {{ rowLabels[y] }}
             </span>
             <Cell
               v-for="(cell, x) in row"
               :key="`cell-${x}-${y}`"
               :cell="cell"
+              :compact="props.compact"
               :reveal-ships="revealShips"
               :interactive="interactive"
               :disabled="isDisabled(cell, x, y)"
               @select="onCellSelect(x, y)"
             />
-            <span class="hidden w-5 text-center text-[10px] font-semibold text-slate-400 sm:block">
+            <span :class="rowLabelClasses">
               {{ rowLabels[y] }}
             </span>
           </div>
         </div>
 
-        <div class="mt-1 hidden items-center gap-0.5 pl-5 sm:flex">
+        <div class="mt-1" :class="axisLabelRowClasses">
           <span
             v-for="label in columnLabels"
             :key="`bottom-${label}`"
-            class="inline-flex w-6 justify-center text-[10px] font-semibold text-slate-400 sm:w-7 md:w-8"
+            class="inline-flex w-3.5 justify-center text-[9px] font-semibold text-slate-400 sm:w-5 sm:text-[10px] md:w-8"
           >
             {{ label }}
           </span>
