@@ -108,6 +108,19 @@ async def schedule_disconnect_forfeit(player_id: str) -> None:
         existing_task.cancel()
 
 
+async def send_invite_restore(player_id: str) -> None:
+    invite = await games.get_pending_invite_for_player(player_id)
+    if invite is None:
+        return
+    await connections.send(
+        player_id,
+        InviteCreatedEvent(
+            invite_code=invite.invite_code,
+            invite_url=f"/?invite={invite.invite_code}",
+        ).model_dump(),
+    )
+
+
 async def send_state_sync(player_id: str) -> None:
     snapshot = await games.build_state_sync_snapshot(player_id)
     if snapshot is None:
@@ -247,6 +260,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         ).model_dump(),
     )
     await send_state_sync(player_id)
+    await send_invite_restore(player_id)
 
     try:
         while True:
@@ -292,5 +306,4 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         if not did_disconnect:
             return
 
-        await games.cancel_pending_invite(player_id)
         await schedule_disconnect_forfeit(player_id)

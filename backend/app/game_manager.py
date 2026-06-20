@@ -128,6 +128,13 @@ class GameManager:
                 player_two_name=invite.opponent_name,
             )
 
+    async def get_pending_invite_for_player(self, player_id: str) -> PendingInvite | None:
+        async with self._lock:
+            invite_code = self._creator_to_invite.get(player_id)
+            if invite_code is None:
+                return None
+            return self._pending_invites.get(invite_code)
+
     async def cancel_pending_invite(self, creator_id: str) -> PendingInvite | None:
         async with self._lock:
             return self._remove_invite_by_creator_unlocked(creator_id)

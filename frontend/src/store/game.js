@@ -1441,6 +1441,16 @@ function init() {
     websocketService.on('message', handleServerMessage),
   ];
 
+  if (typeof document !== 'undefined') {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !state.connected && !state.connecting) {
+        connect();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    unsubscribeFns.push(() => document.removeEventListener('visibilitychange', onVisibilityChange));
+  }
+
   const inviteCode = readInviteCodeFromLocation();
   if (inviteCode) {
     state.urlInviteCode = inviteCode;
