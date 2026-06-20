@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import Board from './Board.vue';
 import { SHIP_LENGTHS, useGameStore } from '../store/game';
 
@@ -124,6 +124,29 @@ const eventCards = computed(() =>
 );
 
 const activeMobileBoard = ref('opponent');
+
+let shotSwitchTimer = null;
+let turnSwitchTimer = null;
+
+onBeforeUnmount(() => {
+  clearTimeout(shotSwitchTimer);
+  clearTimeout(turnSwitchTimer);
+});
+
+watch(
+  () => state.lastShot,
+  (shot) => {
+    if (!shot) return;
+    clearTimeout(shotSwitchTimer);
+    shotSwitchTimer = setTimeout(() => setActiveMobileBoard(shot.board), 800);
+  },
+);
+
+watch(isMyTurn, (nowMyTurn) => {
+  if (!nowMyTurn) return;
+  clearTimeout(turnSwitchTimer);
+  turnSwitchTimer = setTimeout(() => setActiveMobileBoard('opponent'), 1800);
+});
 
 function onPlacementCellSelect({ x, y }) {
   game.placeShip(x, y);
@@ -281,6 +304,7 @@ function setActiveMobileBoard(boardName) {
           title="Your board"
           :board="state.boards.own"
           :reveal-ships="true"
+          :last-shot="state.lastShot?.board === 'own' ? state.lastShot : null"
         />
         <Board
           v-else
@@ -288,18 +312,26 @@ function setActiveMobileBoard(boardName) {
           :board="state.boards.opponent"
           :interactive="isMyTurn && state.phase === 'playing' && !state.pendingShot"
           :pending-shot="state.pendingShot"
+          :last-shot="state.lastShot?.board === 'opponent' ? state.lastShot : null"
           @cell-select="onShotSelect"
         />
       </div>
 
       <div class="hidden grid-cols-2 gap-2 sm:grid sm:gap-3 lg:gap-4">
-        <Board title="Your board" :board="state.boards.own" :reveal-ships="true" :compact="true" />
+        <Board
+          title="Your board"
+          :board="state.boards.own"
+          :reveal-ships="true"
+          :compact="true"
+          :last-shot="state.lastShot?.board === 'own' ? state.lastShot : null"
+        />
         <Board
           title="Opponent board"
           :board="state.boards.opponent"
           :compact="true"
           :interactive="isMyTurn && state.phase === 'playing' && !state.pendingShot"
           :pending-shot="state.pendingShot"
+          :last-shot="state.lastShot?.board === 'opponent' ? state.lastShot : null"
           @cell-select="onShotSelect"
         />
       </div>

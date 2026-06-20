@@ -26,6 +26,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  isLastShot: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(['select']);
@@ -59,6 +63,7 @@ const buttonClasses = computed(() => [
   shotState.value === 'hit' ? 'border-rose-400/80 bg-rose-950/70' : '',
   shotState.value === 'miss' ? 'bg-slate-700/90' : '',
   props.selected && showShip.value && !shotState.value ? 'border-indigo-400/80 bg-indigo-950/80' : '',
+  props.isLastShot ? 'ring-2 ring-white/60' : '',
 ]);
 
 const markerClasses = computed(() => [

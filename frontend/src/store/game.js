@@ -331,6 +331,7 @@ const state = reactive({
     selectedShipIndex: null,
   },
   pendingShot: null,
+  lastShot: null,
   recentEvents: [],
   lastError: null,
 });
@@ -398,6 +399,7 @@ function resetMatchState() {
   state.winner = null;
   state.turn = null;
   state.pendingShot = null;
+  state.lastShot = null;
   state.boards.own = createBoard();
   state.boards.opponent = createBoard();
   resetPlacement();
@@ -994,6 +996,7 @@ function handleShotResult(message) {
 
   const boardName = resolveShotBoard(message, x, y);
   applyShotToBoard(boardName, x, y, result);
+  state.lastShot = { x, y, board: boardName };
 
   const wasPendingShot =
     state.pendingShot && state.pendingShot.x === x && state.pendingShot.y === y;
@@ -1300,6 +1303,7 @@ function handleServerMessage(message) {
       state.winner = null;
       state.turn = null;
       state.pendingShot = null;
+      state.lastShot = null;
       state.boards.own = createBoard();
       state.boards.opponent = createBoard();
       resetPlacement();

@@ -31,6 +31,10 @@ const props = defineProps({
     type: Number,
     default: null,
   },
+  lastShot: {
+    type: Object,
+    default: null,
+  },
 });
 
 const emit = defineEmits(['cell-select']);
@@ -123,6 +127,7 @@ function onCellSelect(x, y) {
               :interactive="interactive"
               :disabled="isDisabled(cell, x, y)"
               :selected="props.selectedShipIndex !== null && cell.shipIndex === props.selectedShipIndex"
+              :is-last-shot="props.lastShot !== null && x === props.lastShot.x && y === props.lastShot.y"
               @select="onCellSelect(x, y)"
             />
             <span :class="rowLabelClasses">
