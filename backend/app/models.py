@@ -87,6 +87,7 @@ class ShotOutcome:
     result: ShotResult
     winner_id: str | None
     next_turn_player_id: str | None
+    sunk_ship_length: int | None = None
 
 
 @dataclass(slots=True)

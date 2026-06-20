@@ -61,14 +61,15 @@ const ownFleetStatus = computed(() => {
   });
 });
 
-const opponentHitCount = computed(() => {
-  let count = 0;
-  for (const row of state.boards.opponent) {
-    for (const cell of row) {
-      if (cell?.shot === 'hit') count++;
-    }
-  }
-  return count;
+const opponentFleetStatus = computed(() => {
+  const sunkLengths = [...state.opponentSunkShips];
+  return SHIP_LENGTHS.map((length, idx) => {
+    const sunkIdx = sunkLengths.indexOf(length);
+    const sunk = sunkIdx !== -1;
+    if (sunk) sunkLengths.splice(sunkIdx, 1);
+    const cells = Array.from({ length }, () => ({ hit: sunk }));
+    return { name: SHIP_NAMES[idx] ?? `Ship ${length}`, cells, hitCount: sunk ? length : 0, sunk };
+  });
 });
 
 const connectionText = computed(() => {
@@ -368,10 +369,11 @@ function setActiveMobileBoard(boardName) {
           label="Your fleet"
           :ships="ownFleetStatus"
         />
-        <div v-else-if="activeMobileBoard === 'opponent'" class="ui-card flex items-center justify-between p-3">
-          <span class="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Opponent fleet</span>
-          <span class="text-sm font-semibold text-slate-700">{{ opponentHitCount }} / {{ TOTAL_FLEET_CELLS }} hit</span>
-        </div>
+        <FleetStatus
+          v-else-if="activeMobileBoard === 'opponent'"
+          label="Opponent fleet"
+          :ships="opponentFleetStatus"
+        />
       </div>
 
       <div class="hidden grid-cols-2 gap-2 sm:grid sm:gap-3 lg:gap-4">
@@ -397,10 +399,7 @@ function setActiveMobileBoard(boardName) {
       <div class="hidden grid-cols-2 gap-2 sm:grid sm:gap-3 lg:gap-4">
         <FleetStatus v-if="ownFleetStatus" label="Your fleet" :ships="ownFleetStatus" />
         <div v-else class="ui-card p-3" />
-        <div class="ui-card flex items-center justify-between p-3">
-          <span class="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Opponent fleet</span>
-          <span class="text-sm font-semibold text-slate-700">{{ opponentHitCount }} / {{ TOTAL_FLEET_CELLS }} hit</span>
-        </div>
+        <FleetStatus label="Opponent fleet" :ships="opponentFleetStatus" />
       </div>
 
       <p v-if="state.phase === 'finished'" class="ui-card px-4 py-3 text-base font-bold text-slate-900">

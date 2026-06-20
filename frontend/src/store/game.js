@@ -333,6 +333,7 @@ const state = reactive({
   pendingShot: null,
   lastShot: null,
   ownFleet: [],
+  opponentSunkShips: [],
   recentEvents: [],
   lastError: null,
 });
@@ -402,6 +403,7 @@ function resetMatchState() {
   state.pendingShot = null;
   state.lastShot = null;
   state.ownFleet = [];
+  state.opponentSunkShips = [];
   state.boards.own = createBoard();
   state.boards.opponent = createBoard();
   resetPlacement();
@@ -1011,8 +1013,13 @@ function handleShotResult(message) {
     state.turn = null;
   }
 
+  if (boardName === 'opponent' && message.sunk_ship_length) {
+    state.opponentSunkShips.push(Number(message.sunk_ship_length));
+  }
+
   const actor = boardName === 'opponent' ? 'You' : 'Opponent';
-  addEvent(`${actor} ${result === 'hit' ? 'hit' : 'missed'} at (${x}, ${y}).`);
+  const sunkSuffix = message.sunk_ship_length ? ' — ship sunk!' : '';
+  addEvent(`${actor} ${result === 'hit' ? 'hit' : 'missed'} at (${x}, ${y}).${sunkSuffix}`);
 }
 
 function handleServerError(message) {
@@ -1307,6 +1314,7 @@ function handleServerMessage(message) {
       state.pendingShot = null;
       state.lastShot = null;
       state.ownFleet = [];
+      state.opponentSunkShips = [];
       state.boards.own = createBoard();
       state.boards.opponent = createBoard();
       resetPlacement();

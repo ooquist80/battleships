@@ -230,10 +230,13 @@ class GameManager:
             shooter_state.shots_fired.add(shot)
 
             result = ShotResult.MISS
+            sunk_ship_length: int | None = None
             if shot in target_state.occupied_cells:
                 result = ShotResult.HIT
                 for ship in target_state.ships:
                     if ship.register_hit(shot):
+                        if ship.is_sunk:
+                            sunk_ship_length = len(ship.cells)
                         break
 
             winner_id: str | None = None
@@ -257,6 +260,7 @@ class GameManager:
                 result=result,
                 winner_id=winner_id,
                 next_turn_player_id=next_turn_player_id,
+                sunk_ship_length=sunk_ship_length,
             )
 
     async def finish_game(self, game_id: str) -> None:

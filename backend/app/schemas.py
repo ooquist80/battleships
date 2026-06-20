@@ -105,6 +105,7 @@ class ShotResultEvent(BaseModel):
     x: int
     y: int
     result: Literal["hit", "miss"]
+    sunk_ship_length: int | None = None
 
 
 class GameOverEvent(BaseModel):

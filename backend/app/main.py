@@ -220,7 +220,8 @@ async def handle_shoot(player_id: str, message: ShootMessage) -> None:
             x=shot_outcome.x,
             y=shot_outcome.y,
             result=shot_outcome.result.value,
-        ).model_dump(),
+            sunk_ship_length=shot_outcome.sunk_ship_length,
+        ).model_dump(exclude_none=True),
     )
 
     if shot_outcome.winner_id is not None:
