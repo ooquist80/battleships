@@ -332,6 +332,7 @@ const state = reactive({
   },
   pendingShot: null,
   lastShot: null,
+  ownFleet: [],
   recentEvents: [],
   lastError: null,
 });
@@ -400,6 +401,7 @@ function resetMatchState() {
   state.turn = null;
   state.pendingShot = null;
   state.lastShot = null;
+  state.ownFleet = [];
   state.boards.own = createBoard();
   state.boards.opponent = createBoard();
   resetPlacement();
@@ -1304,6 +1306,7 @@ function handleServerMessage(message) {
       state.turn = null;
       state.pendingShot = null;
       state.lastShot = null;
+      state.ownFleet = [];
       state.boards.own = createBoard();
       state.boards.opponent = createBoard();
       resetPlacement();
@@ -1317,6 +1320,7 @@ function handleServerMessage(message) {
       if (!boardStatus.ownApplied) {
         copyPlacementToOwnBoard();
       }
+      state.ownFleet = state.placement.ships.map((s) => ({ ...s }));
       addEvent('Game started.');
       break;
 

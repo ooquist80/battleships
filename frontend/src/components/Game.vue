@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import Board from './Board.vue';
+import FleetStatus from './FleetStatus.vue';
 import { SHIP_LENGTHS, useGameStore } from '../store/game';
 
 const game = useGameStore();
@@ -36,6 +37,43 @@ const winnerText = computed(() => {
   }
 
   return `Winner: ${state.winner}`;
+});
+
+const SHIP_NAMES = ['Carrier', 'Battleship', 'Submarine', 'Destroyer', 'Patrol Boat'];
+const TOTAL_FLEET_CELLS = SHIP_LENGTHS.reduce((s, l) => s + l, 0);
+
+const ownFleetStatus = computed(() => {
+  if (!state.ownFleet?.length) return null;
+  return state.ownFleet.map((ship, idx) => {
+    const horizontal = ship.orientation === 'horizontal';
+    const cells = Array.from({ length: ship.length }, (_, i) => {
+      const x = ship.x + (horizontal ? i : 0);
+      const y = ship.y + (horizontal ? 0 : i);
+      return { hit: state.boards.own[y]?.[x]?.shot === 'hit' };
+    });
+    const hitCount = cells.filter((c) => c.hit).length;
+    return {
+      name: SHIP_NAMES[idx] ?? `Ship ${ship.length}`,
+      cells,
+      hitCount,
+      sunk: hitCount === ship.length,
+    };
+  });
+});
+
+const opponentHitCount = computed(() => {
+  let count = 0;
+  for (const row of state.boards.opponent) {
+    for (const cell of row) {
+      if (cell?.shot === 'hit') count++;
+    }
+  }
+  return count;
+});
+
+const connectionText = computed(() => {
+  if (state.connected) return 'Connected';
+  return state.connecting ? 'Connecting...' : 'Disconnected';
 });
 
 const controlButtonClass = 'ui-soft-button';
@@ -166,16 +204,16 @@ function setActiveMobileBoard(boardName) {
 <template>
   <section class="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
     <aside class="order-2 space-y-4 xl:order-1">
-      <div class="ui-card space-y-4 p-4">
+      <div class="hidden ui-card space-y-4 p-4 sm:block">
       <p class="ui-card-title">Players</p>
       <article class="rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <p class="text-xs font-semibold uppercase tracking-wide text-indigo-500">Player One</p>
-        <p class="mt-1 text-base font-bold text-slate-900">{{ shortPlayerId }}</p>
+        <p class="text-xs font-semibold uppercase tracking-wide text-indigo-500">You</p>
+        <p class="mt-1 text-base font-bold text-slate-900">{{ state.lobbyPlayerName || 'Player' }}</p>
         <p class="mt-2 text-sm text-slate-600">{{ playerStateText }}</p>
       </article>
       <article class="rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <p class="text-xs font-semibold uppercase tracking-wide text-violet-500">Player Two</p>
-        <p class="mt-1 text-base font-bold text-slate-900">Opponent</p>
+        <p class="text-xs font-semibold uppercase tracking-wide text-violet-500">Opponent</p>
+        <p class="mt-1 text-base font-bold text-slate-900">{{ state.lobbyOpponentName || 'Opponent' }}</p>
         <p class="mt-2 text-sm text-slate-600">{{ opponentStateText }}</p>
       </article>
       </div>
@@ -231,17 +269,23 @@ function setActiveMobileBoard(boardName) {
     </aside>
 
     <section class="order-1 flex flex-col gap-4 xl:order-2">
-      <div class="order-2 sm:order-1 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-4 text-white shadow-[0_22px_45px_-30px_rgba(15,23,42,0.9)] sm:px-5">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-indigo-200">Game status</p>
-          <h2 class="mt-1 text-xl font-semibold tracking-wide">{{ statusHeadline }}</h2>
-          <p class="mt-1 text-sm text-slate-300">{{ statusSupportText }}</p>
+      <!-- Mobile player names bar -->
+      <div class="ui-card flex items-center justify-around p-3 sm:hidden">
+        <div class="text-center">
+          <p class="text-sm font-bold text-slate-900">{{ state.lobbyPlayerName || 'You' }}</p>
+          <p class="mt-0.5 text-[11px] text-slate-500">{{ playerStateText }}</p>
         </div>
-        <div class="rounded-full border border-white/20 px-4 py-2 text-sm font-semibold text-indigo-100">
-          Game ID {{ shortGameId }}
+        <span class="text-xs font-semibold text-slate-400">vs</span>
+        <div class="text-center">
+          <p class="text-sm font-bold text-slate-900">{{ state.lobbyOpponentName || 'Opponent' }}</p>
+          <p class="mt-0.5 text-[11px] text-slate-500">{{ opponentStateText }}</p>
         </div>
       </div>
+
+      <div class="order-2 sm:order-1 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-4 text-white shadow-[0_22px_45px_-30px_rgba(15,23,42,0.9)] sm:px-5">
+      <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-indigo-200">Game status</p>
+      <h2 class="mt-1 text-xl font-semibold tracking-wide">{{ statusHeadline }}</h2>
+      <p class="mt-1 text-sm text-slate-300">{{ statusSupportText }}</p>
       </div>
 
       <div class="order-1 sm:order-2 space-y-4">
@@ -317,6 +361,19 @@ function setActiveMobileBoard(boardName) {
         />
       </div>
 
+      <!-- Mobile fleet status -->
+      <div class="sm:hidden">
+        <FleetStatus
+          v-if="activeMobileBoard === 'own' && ownFleetStatus"
+          label="Your fleet"
+          :ships="ownFleetStatus"
+        />
+        <div v-else-if="activeMobileBoard === 'opponent'" class="ui-card flex items-center justify-between p-3">
+          <span class="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Opponent fleet</span>
+          <span class="text-sm font-semibold text-slate-700">{{ opponentHitCount }} / {{ TOTAL_FLEET_CELLS }} hit</span>
+        </div>
+      </div>
+
       <div class="hidden grid-cols-2 gap-2 sm:grid sm:gap-3 lg:gap-4">
         <Board
           title="Your board"
@@ -336,10 +393,28 @@ function setActiveMobileBoard(boardName) {
         />
       </div>
 
+      <!-- Desktop fleet status row -->
+      <div class="hidden grid-cols-2 gap-2 sm:grid sm:gap-3 lg:gap-4">
+        <FleetStatus v-if="ownFleetStatus" label="Your fleet" :ships="ownFleetStatus" />
+        <div v-else class="ui-card p-3" />
+        <div class="ui-card flex items-center justify-between p-3">
+          <span class="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Opponent fleet</span>
+          <span class="text-sm font-semibold text-slate-700">{{ opponentHitCount }} / {{ TOTAL_FLEET_CELLS }} hit</span>
+        </div>
+      </div>
+
       <p v-if="state.phase === 'finished'" class="ui-card px-4 py-3 text-base font-bold text-slate-900">
         {{ winnerText }}
       </p>
       </template>
+      </div>
+
+      <!-- Mobile bottom strip: game ID + connection status -->
+      <div class="order-3 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs sm:hidden">
+        <span :class="state.connected ? 'text-emerald-600' : 'text-rose-600'" class="font-semibold">
+          {{ connectionText }}
+        </span>
+        <span class="text-slate-500">Game {{ shortGameId }}</span>
       </div>
     </section>
 

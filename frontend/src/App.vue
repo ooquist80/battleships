@@ -38,11 +38,9 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex flex-wrap items-center justify-end gap-2">
-          <span class="ui-meta-chip" :class="state.connected ? 'text-emerald-700' : 'text-rose-700'">
+          <span v-if="showLobby" class="ui-meta-chip" :class="state.connected ? 'text-emerald-700' : 'text-rose-700'">
             {{ connectionText }}
           </span>
-          <span class="ui-meta-chip" v-if="state.playerId !== null">Player {{ state.playerId }}</span>
-          <span class="ui-meta-chip" v-if="state.gameId !== null">Game {{ state.gameId }}</span>
           <button
             v-if="!state.connected"
             type="button"
