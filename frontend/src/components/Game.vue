@@ -33,10 +33,10 @@ const winnerText = computed(() => {
   }
 
   if (state.playerId !== null && String(state.winner) === String(state.playerId)) {
-    return 'You won!';
+    return `${state.lobbyPlayerName || 'You'} won!`;
   }
 
-  return `Winner: ${state.winner}`;
+  return `${state.lobbyOpponentName || 'Opponent'} won!`;
 });
 
 const SHIP_NAMES = ['Carrier', 'Battleship', 'Submarine', 'Destroyer', 'Patrol Boat'];
@@ -80,16 +80,6 @@ const connectionText = computed(() => {
 const controlButtonClass = 'ui-soft-button';
 const submitButtonClass = 'ui-primary-button';
 
-const shortPlayerId = computed(() => {
-  if (state.playerId === null) {
-    return 'Pending';
-  }
-  const value = String(state.playerId);
-  if (value.length <= 10) {
-    return value;
-  }
-  return `${value.slice(0, 6)}...${value.slice(-4)}`;
-});
 
 const shortGameId = computed(() => {
   if (state.gameId === null) {
@@ -227,15 +217,6 @@ function setActiveMobileBoard(boardName) {
           type="button"
           :class="controlButtonClass"
           :disabled="state.placement.submitted"
-          @click="game.togglePlacementOrientation"
-        >
-          Rotate: {{ state.placement.orientation }}
-        </button>
-
-        <button
-          type="button"
-          :class="controlButtonClass"
-          :disabled="state.placement.submitted"
           @click="game.resetPlacementBoard"
         >
           Reset placement
@@ -297,6 +278,7 @@ function setActiveMobileBoard(boardName) {
         :reveal-ships="true"
         :interactive="!state.placement.submitted"
         :selected-ship-index="state.placement.selectedShipIndex"
+        :placement-ships="state.placement.ships"
         @cell-select="onPlacementCellSelect"
       />
 

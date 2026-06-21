@@ -1356,7 +1356,7 @@ function handleServerMessage(message) {
         state.winner !== null && state.playerId !== null
           ? String(state.winner) === String(state.playerId)
           : false;
-      addEvent(didWin ? 'Game over. You won!' : `Game over. Winner: ${state.winner ?? 'unknown'}.`);
+      addEvent(didWin ? 'Game over. You won!' : `Game over. ${state.lobbyOpponentName || 'Opponent'} won!`);
       break;
     }
 
