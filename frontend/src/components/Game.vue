@@ -260,24 +260,24 @@ function setActiveMobileBoard(boardName) {
       </div>
     </aside>
 
-    <section class="order-1 flex flex-col gap-4 xl:order-2">
+    <section class="order-1 flex flex-col gap-2 sm:gap-4 xl:order-2">
       <!-- Mobile player names bar -->
-      <div class="ui-card flex items-center justify-around px-3 py-2 sm:hidden">
+      <div class="ui-card flex items-center justify-around px-3 py-1.5 sm:hidden">
         <div class="text-center">
           <p class="text-sm font-bold text-slate-900">{{ state.lobbyPlayerName || 'You' }}</p>
-          <p class="text-[11px] text-slate-500">{{ playerStateText }}</p>
+          <p class="text-[10px] text-slate-500">{{ playerStateText }}</p>
         </div>
         <span class="text-xs font-semibold text-slate-400">vs</span>
         <div class="text-center">
           <p class="text-sm font-bold text-slate-900">{{ state.lobbyOpponentName || 'Opponent' }}</p>
-          <p class="text-[11px] text-slate-500">{{ opponentStateText }}</p>
+          <p class="text-[10px] text-slate-500">{{ opponentStateText }}</p>
         </div>
       </div>
 
-      <div class="order-1 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-3 text-white shadow-[0_22px_45px_-30px_rgba(15,23,42,0.9)] sm:px-5">
-      <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-indigo-200">Game status</p>
-      <h2 class="mt-0.5 text-lg font-semibold tracking-wide sm:text-xl">{{ statusHeadline }}</h2>
-      <p class="text-sm text-slate-300">{{ statusSupportText }}</p>
+      <div class="order-1 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 py-2 text-white shadow-[0_22px_45px_-30px_rgba(15,23,42,0.9)] sm:px-5 sm:py-4">
+      <p class="hidden text-[11px] font-semibold uppercase tracking-[0.2em] text-indigo-200 sm:block">Game status</p>
+      <h2 class="text-base font-semibold tracking-wide sm:mt-0.5 sm:text-xl">{{ statusHeadline }}</h2>
+      <p class="text-xs text-slate-300 sm:text-sm">{{ statusSupportText }}</p>
       </div>
 
       <div class="order-2 space-y-4">
