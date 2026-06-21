@@ -200,24 +200,30 @@ const rowLabels = computed(() =>
 
 const boardCardClasses = computed(() =>
   props.compact
-    ? 'ui-card flex w-full flex-col gap-2 p-1.5 sm:p-2.5 md:gap-3 md:p-4'
+    ? 'ui-card flex w-full flex-col gap-2 p-1.5 sm:p-2.5'
     : 'ui-card flex w-full flex-col gap-3 p-3 sm:p-4',
 );
 
 const boardFrameClasses = computed(() =>
   props.compact
-    ? 'mx-auto w-fit rounded-xl border border-slate-700/80 bg-[#111827] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)] sm:p-1.5 md:rounded-2xl md:p-3'
+    ? 'mx-auto w-fit rounded-xl border border-slate-700/80 bg-[#111827] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)] sm:p-1.5'
     : 'mx-auto w-fit rounded-2xl border border-slate-700/80 bg-[#111827] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)] sm:p-3',
 );
 
 const boardGapClasses = computed(() => (props.compact ? 'gap-px sm:gap-0.5' : 'gap-0.5'));
 const axisLabelRowClasses = computed(() =>
-  props.compact ? 'mb-1 hidden items-center gap-px pl-4 md:flex' : 'mb-1 hidden items-center gap-0.5 pl-5 sm:flex',
+  props.compact ? 'mb-1 hidden items-center gap-0.5 pl-4 sm:flex' : 'mb-1 hidden items-center gap-0.5 pl-5 sm:flex',
 );
 const rowLabelClasses = computed(() =>
   props.compact
-    ? 'hidden w-4 text-center text-[9px] font-semibold text-slate-400 md:block'
+    ? 'hidden w-4 text-center text-[9px] font-semibold text-slate-400 sm:block'
     : 'hidden w-5 text-center text-[10px] font-semibold text-slate-400 sm:block',
+);
+
+const columnLabelClass = computed(() =>
+  props.compact
+    ? 'inline-flex w-3.5 justify-center text-[9px] font-semibold text-slate-400 sm:w-5 sm:text-[10px]'
+    : 'inline-flex w-3.5 justify-center text-[9px] font-semibold text-slate-400 sm:w-5 sm:text-[10px] md:w-8',
 );
 
 function isPendingCell(x, y) {
@@ -251,7 +257,7 @@ function onCellSelect(x, y) {
           <span
             v-for="label in columnLabels"
             :key="`top-${label}`"
-            class="inline-flex w-3.5 justify-center text-[9px] font-semibold text-slate-400 sm:w-5 sm:text-[10px] md:w-8"
+            :class="columnLabelClass"
           >
             {{ label }}
           </span>
@@ -298,7 +304,7 @@ function onCellSelect(x, y) {
           <span
             v-for="label in columnLabels"
             :key="`bottom-${label}`"
-            class="inline-flex w-3.5 justify-center text-[9px] font-semibold text-slate-400 sm:w-5 sm:text-[10px] md:w-8"
+            :class="columnLabelClass"
           >
             {{ label }}
           </span>

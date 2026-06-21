@@ -1,4 +1,4 @@
-# Battleships MVP
+# Battleships
 
 ## Running with Docker Compose
 
