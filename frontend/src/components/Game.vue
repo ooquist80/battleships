@@ -301,6 +301,20 @@ function setActiveMobileBoard(boardName) {
           <span v-else-if="ship.current" class="text-[10px] font-semibold text-indigo-400">next</span>
         </li>
       </ul>
+
+      <button
+        type="button"
+        class="w-full rounded-xl px-4 py-3 text-sm font-semibold transition-colors"
+        :class="state.placement.submitted
+          ? 'cursor-default bg-emerald-100 text-emerald-700'
+          : allShipsPlaced
+            ? 'bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800'
+            : 'cursor-not-allowed bg-slate-200 text-slate-400'"
+        :disabled="!allShipsPlaced || state.placement.submitted"
+        @click="game.submitShips"
+      >
+        {{ state.placement.submitted ? '✓ Fleet submitted — waiting for opponent' : 'Submit fleet' }}
+      </button>
       </template>
       <template v-else>
       <div class="mb-2 flex items-center gap-2 sm:hidden">
