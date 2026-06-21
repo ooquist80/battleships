@@ -8,14 +8,20 @@ const game = useGameStore();
 const state = game.state;
 
 const nextShipLength = game.nextShipLength;
+const nextFleetIndex = game.nextFleetIndex;
 const allShipsPlaced = game.allShipsPlaced;
 const isMyTurn = game.isMyTurn;
 
 const placementShips = computed(() =>
   SHIP_LENGTHS.map((length, index) => ({
     key: `${length}-${index}`,
+    index,
     length,
-    placed: index < state.placement.nextShipIndex,
+    name: SHIP_NAMES[index] ?? `Ship ${length}`,
+    placed: state.placement.ships[index] !== null,
+    current: index === nextFleetIndex.value,
+    pendingSelected: index === state.placement.pendingShipIndex,
+    boardSelected: index === state.placement.selectedShipIndex,
   })),
 );
 
@@ -282,18 +288,41 @@ function setActiveMobileBoard(boardName) {
         @cell-select="onPlacementCellSelect"
       />
 
-      <ul class="ui-card flex flex-wrap gap-2 p-3 text-sm">
+      <ul class="ui-card divide-y divide-slate-100 overflow-hidden p-0">
         <li
           v-for="ship in placementShips"
           :key="ship.key"
           :class="[
-            'rounded-lg border px-2.5 py-1',
-            ship.placed
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              : 'border-slate-200 bg-slate-50 text-slate-600',
+            'flex cursor-pointer items-center gap-3 px-3 py-2 transition-colors select-none',
+            ship.placed && !ship.boardSelected ? 'opacity-40 hover:opacity-70' : '',
+            ship.pendingSelected ? 'bg-indigo-100/80 ring-1 ring-inset ring-indigo-300' : ship.current && !ship.placed ? 'bg-indigo-50/60' : '',
+            ship.boardSelected ? 'bg-indigo-50/60' : '',
+            state.placement.submitted ? 'cursor-default' : '',
           ]"
+          @click="game.selectShipFromPanel(ship.index)"
         >
-          Ship {{ ship.length }} {{ ship.placed ? '✓' : '' }}
+          <div class="flex gap-px">
+            <span
+              v-for="i in ship.length"
+              :key="i"
+              :class="[
+                'h-4 w-4 rounded-[3px] border',
+                ship.placed
+                  ? 'border-emerald-300/80 bg-emerald-400/60'
+                  : ship.pendingSelected
+                    ? 'border-indigo-400/90 bg-indigo-500/70'
+                    : ship.current
+                      ? 'border-indigo-300/80 bg-indigo-400/60'
+                      : 'border-slate-500/50 bg-slate-600/30',
+              ]"
+            />
+          </div>
+          <span :class="['flex-1 text-xs font-semibold', ship.placed && !ship.boardSelected ? 'text-slate-400' : ship.pendingSelected ? 'text-indigo-700' : ship.current ? 'text-indigo-600' : 'text-slate-500']">
+            {{ ship.name }}
+          </span>
+          <span v-if="ship.placed" class="text-[10px] font-bold text-emerald-500">✓</span>
+          <span v-else-if="ship.pendingSelected" class="text-[10px] font-semibold text-indigo-500">selected</span>
+          <span v-else-if="ship.current" class="text-[10px] font-semibold text-indigo-400">next</span>
         </li>
       </ul>
       </template>

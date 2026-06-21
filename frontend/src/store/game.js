@@ -85,6 +85,19 @@ function normalizePlacementOrientation(value) {
   return null;
 }
 
+function shipsArrayToFixed(ships) {
+  const result = Array(SHIP_LENGTHS.length).fill(null);
+  const available = [...ships];
+  SHIP_LENGTHS.forEach((len, idx) => {
+    const i = available.findIndex((s) => s && s.length === len);
+    if (i >= 0) {
+      result[idx] = available[i];
+      available.splice(i, 1);
+    }
+  });
+  return result;
+}
+
 function normalizePlacementShipsSnapshot(value) {
   if (!Array.isArray(value)) {
     return null;
@@ -325,10 +338,10 @@ const state = reactive({
   placement: {
     board: createBoard(),
     orientation: 'horizontal',
-    ships: [],
-    nextShipIndex: 0,
+    ships: Array(SHIP_LENGTHS.length).fill(null),
     submitted: false,
     selectedShipIndex: null,
+    pendingShipIndex: null,
   },
   pendingShot: null,
   lastShot: null,
@@ -338,8 +351,16 @@ const state = reactive({
   lastError: null,
 });
 
-const allShipsPlaced = computed(() => state.placement.nextShipIndex >= SHIP_LENGTHS.length);
-const nextShipLength = computed(() => SHIP_LENGTHS[state.placement.nextShipIndex] ?? null);
+const allShipsPlaced = computed(() => state.placement.ships.every((s) => s !== null));
+const nextFleetIndex = computed(() => {
+  const pending = state.placement.pendingShipIndex;
+  if (pending !== null && state.placement.ships[pending] === null) return pending;
+  return state.placement.ships.indexOf(null);
+});
+const nextShipLength = computed(() => {
+  const idx = nextFleetIndex.value;
+  return idx >= 0 ? SHIP_LENGTHS[idx] : null;
+});
 const isMyTurn = computed(() => {
   if (state.phase !== 'playing' || state.winner) {
     return false;
@@ -373,10 +394,10 @@ function addEvent(text) {
 function resetPlacement() {
   state.placement.board = createBoard();
   state.placement.orientation = 'horizontal';
-  state.placement.ships = [];
-  state.placement.nextShipIndex = 0;
+  state.placement.ships = Array(SHIP_LENGTHS.length).fill(null);
   state.placement.submitted = false;
   state.placement.selectedShipIndex = null;
+  state.placement.pendingShipIndex = null;
 }
 
 function copyPlacementToOwnBoard() {
@@ -444,6 +465,7 @@ function canPlaceShipAt(board, x, y, length, orientation, ignoreShipIndex = -1) 
 function rebuildPlacementBoard() {
   const board = createBoard();
   state.placement.ships.forEach((ship, idx) => {
+    if (!ship) return;
     const horizontal = ship.orientation === 'horizontal';
     for (let offset = 0; offset < ship.length; offset += 1) {
       const x = ship.x + (horizontal ? offset : 0);
@@ -517,31 +539,43 @@ function placeShip(x, y) {
   // Tapping a placed ship selects it
   if (cell?.hasShip && cell?.shipIndex !== null && cell?.shipIndex !== undefined) {
     state.placement.selectedShipIndex = cell.shipIndex;
+    state.placement.pendingShipIndex = null;
     return;
   }
 
-  // Tapping an empty cell places the next ship
-  const length = nextShipLength.value;
-  if (!length) {
-    return;
-  }
+  // Tapping an empty cell places the pending/next ship
+  const fleetIdx = nextFleetIndex.value;
+  if (fleetIdx < 0) return;
+  const length = SHIP_LENGTHS[fleetIdx];
 
   if (!canPlaceShipAt(state.placement.board, x, y, length, state.placement.orientation)) {
     addEvent('Invalid placement. Ships cannot overlap or go out of bounds.');
     return;
   }
 
-  state.placement.ships.push({
+  state.placement.ships[fleetIdx] = {
     x,
     y,
     length,
     orientation: state.placement.orientation,
-  });
-  state.placement.nextShipIndex += 1;
+  };
+  state.placement.pendingShipIndex = null;
   rebuildPlacementBoard();
 
   if (allShipsPlaced.value) {
     addEvent('All ships placed. Submit when ready.');
+  }
+}
+
+function selectShipFromPanel(index) {
+  if (state.phase !== 'placement' || state.placement.submitted) return;
+  if (index < 0 || index >= SHIP_LENGTHS.length) return;
+  if (state.placement.ships[index] !== null) {
+    state.placement.selectedShipIndex = index;
+    state.placement.pendingShipIndex = null;
+  } else {
+    state.placement.pendingShipIndex = index;
+    state.placement.selectedShipIndex = null;
   }
 }
 
@@ -693,12 +727,9 @@ function submitShips() {
     return;
   }
 
-  const ships = state.placement.ships.map(({ x, y, length, orientation }) => ({
-    x,
-    y,
-    length,
-    orientation,
-  }));
+  const ships = state.placement.ships
+    .filter(Boolean)
+    .map(({ x, y, length, orientation }) => ({ x, y, length, orientation }));
 
   const sent = websocketService.send({ type: 'place_ships', ships });
   if (!sent) {
@@ -1122,14 +1153,11 @@ function applyStateSync(message, boardStatus) {
   );
 
   if (syncedShips !== null) {
-    state.placement.ships = syncedShips;
-    state.placement.nextShipIndex = Math.min(syncedShips.length, SHIP_LENGTHS.length);
-  } else if (state.phase === 'placement') {
-    state.placement.ships = [];
-    state.placement.nextShipIndex = state.placement.submitted ? SHIP_LENGTHS.length : 0;
+    state.placement.ships = shipsArrayToFixed(syncedShips);
+  } else if (state.phase === 'placement' && !state.placement.submitted) {
+    state.placement.ships = Array(SHIP_LENGTHS.length).fill(null);
   } else if (state.phase !== 'placement') {
-    state.placement.ships = [];
-    state.placement.nextShipIndex = 0;
+    state.placement.ships = Array(SHIP_LENGTHS.length).fill(null);
   }
 
   const syncedPlacementBoard =
@@ -1145,10 +1173,6 @@ function applyStateSync(message, boardStatus) {
     state.placement.board = createPlacementBoardFromShips(syncedShips);
   } else if (state.phase !== 'placement') {
     state.placement.board = createBoard();
-  }
-
-  if (state.phase === 'placement' && state.placement.submitted) {
-    state.placement.nextShipIndex = SHIP_LENGTHS.length;
   }
 
   const inviteCodeFromSync =
@@ -1328,7 +1352,7 @@ function handleServerMessage(message) {
       if (!boardStatus.ownApplied) {
         copyPlacementToOwnBoard();
       }
-      state.ownFleet = state.placement.ships.map((s) => ({ ...s }));
+      state.ownFleet = state.placement.ships.filter(Boolean).map((s) => ({ ...s }));
       addEvent('Game started.');
       break;
 
@@ -1496,10 +1520,12 @@ const store = {
   togglePlacementOrientation,
   resetPlacementBoard,
   placeShip,
+  selectShipFromPanel,
   submitShips,
   shoot,
   allShipsPlaced,
   nextShipLength,
+  nextFleetIndex,
   isMyTurn,
 };
 
