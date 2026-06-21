@@ -83,8 +83,6 @@ const connectionText = computed(() => {
   return state.connecting ? 'Connecting...' : 'Disconnected';
 });
 
-const controlButtonClass = 'ui-soft-button';
-const submitButtonClass = 'ui-primary-button';
 
 
 const shortGameId = computed(() => {
@@ -219,45 +217,6 @@ function setActiveMobileBoard(boardName) {
       </article>
       </div>
 
-      <div class="ui-card space-y-3 p-4">
-      <p class="ui-card-title">Actions</p>
-
-      <template v-if="state.phase === 'placement'">
-        <button
-          type="button"
-          :class="controlButtonClass"
-          :disabled="state.placement.submitted"
-          @click="game.resetPlacementBoard"
-        >
-          Reset placement
-        </button>
-
-        <button
-          type="button"
-          :class="submitButtonClass"
-          :disabled="!allShipsPlaced || state.placement.submitted"
-          @click="game.submitShips"
-        >
-          {{ state.placement.submitted ? 'Submitted' : 'Submit ships' }}
-        </button>
-      </template>
-      <template v-else>
-        <button type="button" class="ui-secondary-button" disabled>
-          {{ turnText || 'In progress' }}
-        </button>
-        <button type="button" class="ui-primary-button" disabled>
-          {{ state.pendingShot ? 'Resolving shot...' : 'Waiting action' }}
-        </button>
-      </template>
-      </div>
-
-      <div class="ui-card p-4">
-      <p class="ui-card-title mb-2">Type of game</p>
-      <label class="flex items-center gap-2 text-sm text-slate-700">
-        <input checked disabled type="checkbox" class="accent-violet-500" />
-        According to the rules
-      </label>
-      </div>
     </aside>
 
     <section class="order-1 flex flex-col gap-2 sm:gap-4 xl:order-2">
