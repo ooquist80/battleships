@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import confetti from 'canvas-confetti';
 import Board from './Board.vue';
 import FleetStatus from './FleetStatus.vue';
 import { SHIP_LENGTHS, useGameStore } from '../store/game';
@@ -33,16 +34,17 @@ const turnText = computed(() => {
   return isMyTurn.value ? 'Your turn' : 'Opponent turn';
 });
 
+const youWon = computed(() =>
+  state.winner !== null &&
+  state.playerId !== null &&
+  String(state.winner) === String(state.playerId),
+);
+
 const winnerText = computed(() => {
-  if (!state.winner) {
-    return 'Game over';
-  }
-
-  if (state.playerId !== null && String(state.winner) === String(state.playerId)) {
-    return `${state.lobbyPlayerName || 'You'} won!`;
-  }
-
-  return `${state.lobbyOpponentName || 'Opponent'} won!`;
+  if (!state.winner) return 'Game over';
+  return youWon.value
+    ? `${state.lobbyPlayerName || 'You'} won!`
+    : `${state.lobbyOpponentName || 'Opponent'} won!`;
 });
 
 const SHIP_NAMES = ['Carrier', 'Battleship', 'Submarine', 'Destroyer', 'Patrol Boat'];
@@ -179,6 +181,16 @@ watch(isMyTurn, (nowMyTurn) => {
   if (!nowMyTurn) return;
   clearTimeout(turnSwitchTimer);
   turnSwitchTimer = setTimeout(() => setActiveMobileBoard('opponent'), 1800);
+});
+
+watch(youWon, (won) => {
+  if (!won) return;
+  const burst = (x, angle, spread) =>
+    confetti({ particleCount: 60, angle, spread, origin: { x, y: 0.6 }, startVelocity: 55, ticks: 200 });
+  burst(0.25, 60, 70);
+  burst(0.75, 120, 70);
+  setTimeout(() => { burst(0.1, 80, 50); burst(0.9, 100, 50); }, 300);
+  setTimeout(() => { burst(0.5, 90, 90); }, 600);
 });
 
 function onPlacementCellSelect({ x, y }) {
@@ -377,9 +389,19 @@ function setActiveMobileBoard(boardName) {
         <FleetStatus label="Opponent fleet" :ships="opponentFleetStatus" />
       </div>
 
-      <p v-if="state.phase === 'finished'" class="ui-card px-4 py-3 text-base font-bold text-slate-900">
-        {{ winnerText }}
-      </p>
+      <div v-if="state.phase === 'finished'" :class="[
+        'ui-card overflow-hidden px-5 py-4 text-center',
+        youWon ? 'border-2 border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-slate-50',
+      ]">
+        <p v-if="youWon" class="text-2xl">🏆</p>
+        <p v-else class="text-2xl">💀</p>
+        <p :class="['mt-1 text-lg font-bold', youWon ? 'text-emerald-700' : 'text-slate-700']">
+          {{ winnerText }}
+        </p>
+        <p :class="['mt-0.5 text-xs', youWon ? 'text-emerald-500' : 'text-slate-400']">
+          {{ youWon ? 'All enemy ships destroyed!' : 'Your fleet was wiped out.' }}
+        </p>
+      </div>
       </template>
       </div>
 
