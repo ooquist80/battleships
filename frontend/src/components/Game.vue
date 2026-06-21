@@ -187,6 +187,10 @@ function onPlacementCellSelect({ x, y }) {
   game.placeShip(x, y);
 }
 
+function onShipMove({ shipIndex, x, y }) {
+  game.moveShip(shipIndex, x, y);
+}
+
 function onShotSelect({ x, y }) {
   game.shoot(x, y);
 }
@@ -286,6 +290,7 @@ function setActiveMobileBoard(boardName) {
         :selected-ship-index="state.placement.selectedShipIndex"
         :placement-ships="state.placement.ships"
         @cell-select="onPlacementCellSelect"
+        @ship-move="onShipMove"
       />
 
       <ul class="ui-card divide-y divide-slate-100 overflow-hidden p-0">

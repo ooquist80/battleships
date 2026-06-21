@@ -567,6 +567,19 @@ function placeShip(x, y) {
   }
 }
 
+function moveShip(shipIndex, x, y) {
+  if (state.phase !== 'placement' || state.placement.submitted) return;
+  const ship = state.placement.ships[shipIndex];
+  if (!ship) return;
+  if (!canPlaceShipAt(state.placement.board, x, y, ship.length, ship.orientation, shipIndex)) {
+    addEvent('Invalid placement. Ships cannot overlap or go out of bounds.');
+    return;
+  }
+  state.placement.ships[shipIndex] = { ...ship, x, y };
+  state.placement.selectedShipIndex = null;
+  rebuildPlacementBoard();
+}
+
 function selectShipFromPanel(index) {
   if (state.phase !== 'placement' || state.placement.submitted) return;
   if (index < 0 || index >= SHIP_LENGTHS.length) return;
@@ -1520,6 +1533,7 @@ const store = {
   togglePlacementOrientation,
   resetPlacementBoard,
   placeShip,
+  moveShip,
   selectShipFromPanel,
   submitShips,
   shoot,

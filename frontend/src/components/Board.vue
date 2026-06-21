@@ -41,7 +41,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['cell-select']);
+const emit = defineEmits(['cell-select', 'ship-move']);
 
 const gridRef = ref(null);
 
@@ -118,7 +118,7 @@ function onPointerUp() {
   const anchorY = drag.overY - drag.offsetY;
   const movedToNewCell = anchorX !== drag.startX - drag.offsetX || anchorY !== drag.startY - drag.offsetY;
   if (drag.moved && movedToNewCell && isGhostValid.value) {
-    emit('cell-select', { x: anchorX, y: anchorY });
+    emit('ship-move', { shipIndex: drag.shipIndex, x: anchorX, y: anchorY });
   } else if (!drag.moved || !movedToNewCell) {
     if (dragStartedWithSelection) {
       emit('cell-select', { x: drag.startX, y: drag.startY }); // rotate
